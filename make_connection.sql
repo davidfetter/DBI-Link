@@ -167,7 +167,8 @@ SQL
                 elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
             }
         }
-        my $method_name = "$parms{'local_schema'}.$table->{TABLE_NAME}";
+        my $base_name = "$parms{'local_schema'}.$table->{TABLE_NAME}";
+        my $method_name = join('_', $base_name, 'sel');
         $sql = <<SQL;
 CREATE OR REPLACE FUNCTION $method_name ()
 RETURNS SETOF $type_name
@@ -240,6 +241,17 @@ SQL
             elog NOTICE, "Created method $method_name."
         } else {
             elog ERROR, "Could not create method $method_name.  $rv->{status}";
+        }
+        $sql = <<SQL;
+CREATE VIEW ${base_name}_view AS
+SELECT * FROM $method_name()
+SQL
+        elog NOTICE, "VIEW SQL is\n$sql";
+        my $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created VIEW $method_name.";
+        } else {
+            elog ERROR, "Could not create VIEW $method_name.  $rv->{status}";
         }
     }
     $sth->finish;

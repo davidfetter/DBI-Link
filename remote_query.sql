@@ -3,7 +3,7 @@
 --  This depends on functionality in DBI.sql.   --
 --                                              --
 --------------------------------------------------
-CREATE OR REPLACE FUNCTION data_link (
+CREATE OR REPLACE FUNCTION remote_query (
   driver TEXT
 , host TEXT
 , port INTEGER
@@ -11,10 +11,11 @@ CREATE OR REPLACE FUNCTION data_link (
 , db_user TEXT
 , db_password TEXT
 , query TEXT
+, safe BOOLEAN
 )
 RETURNS SETOF RECORD
 LANGUAGE plperlu AS $$
-my($driver, $host, $port, $database, $db_user, $db_password, $query) = @_;
+my($driver, $host, $port, $database, $db_user, $db_password, $query, $safe) = @_;
 ##################################################################
 #                                                                #
 # Sanity checks: must have a query, and it must be SELECT query. #
@@ -23,7 +24,7 @@ my($driver, $host, $port, $database, $db_user, $db_password, $query) = @_;
 ##################################################################
 if (length($query) == 0) {
     elog ERROR, 'Must issue a query!';
-} elsif ($query !~ /^select/i) {
+} elsif ($query !~ /^select/i && $safe) {
     elog ERROR, 'Must issue a SELECT query!';
 }
 
