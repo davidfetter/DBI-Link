@@ -31,6 +31,9 @@ create_accessor_methods(
   local_schema => $local_schema
 , remote_schema => $remote_schema
 , remote_catalog => $remote_catalog
+, data_source => $data_source 
+, db_user => $db_user
+, db_password => $db_password
 );
 
 return TRUE;
@@ -154,11 +157,15 @@ SQL
 }
 
 sub create_accessor_methods {
-    my $DEBUG = 1; # Set this to 1 for more wordiness, 0 for less.
+    my $DEBUG = 0; # Set this to 1 for more wordiness, 0 for less.
     my %parms = (
       local_schema  => undef
     , remote_schema  => undef
     , remote_catalog  => undef
+    , data_source => undef
+    , db_user => undef
+    , db_password => undef
+    , dbh_attributes => undef
     , @_
     );
     my $types = "'TABLE','VIEW'";
@@ -179,7 +186,7 @@ SQL
     }
     while(my $table = $sth->fetchrow_hashref) {
         my $base_name = $table->{TABLE_NAME};
-        my $type_name = join('_',$base_name,'type');
+        my $type_name = join('_',$base_name,'rowtype');
         my @cols;
         my %comments = ();
         my $sth2 = $dbh->column_info(undef, '%', $table->{TABLE_NAME}, '%');
@@ -236,45 +243,49 @@ SQL
 CREATE OR REPLACE FUNCTION $method_name ()
 RETURNS SETOF $type_name
 LANGUAGE plperlu
-AS $quote
+AS \$method_body\$
 use DBI;
 
+my \$attr = undef;
+my \$dbh_attr = "$parms{dbh_attributes}";
+if (length(\$dbh_attr) > 0) {
+    \$attr = eval(\$dbh_attr);
+}
 my \$dbh = DBI->connect(
-  $parms{data_source}
-, $parms{db_user}
-, $parms{db_password}
-, {
-    RaiseError => 0
-  , PrintError => 0
-  , AutoCommit => 0
-  }
+  '$parms{data_source}'
+, '$parms{db_user}'
+, '$parms{db_password}'
+, \$attr
 );
 
 if (\$DBI::errstr) {
     elog ERROR, "
 Could not connect to database
-data source: \$data_source
-user: \$db_user
-password: \$db_password
+data source: $parms{data_source}
+user: $parms{db_user}
+password: $parms{db_password}
+attributes:
+    $parms{dbh_attributes}
 error: \$DBI::errstr
 ";
 }
 
-# elog NOTICE, "Connected to database";
+elog NOTICE, 'Connected to database';
 
-my \$sql = 'SELECT * FROM $base_name';
+my \$sql = "SELECT * FROM $base_name";
 
-# elog NOTICE, "sql is\n\$sql";
+elog NOTICE, "sql is\n$sql";
 
 my \$sth = \$dbh->prepare(\$sql);
 if (\$DBI::errstr) {
-    elog ERROR, "
+    my \$err = <<ERR2;
 Cannot prepare
 
 \$sql
 
 \$DBI::errstr
-";
+ERR2
+    elog ERROR, \$err;
 }
 
 my \$rowset;
@@ -288,9 +299,12 @@ while(my \$row = \$sth->fetchrow_hashref) {
 \$sth->finish;
 \$dbh->disconnect;
 return \$rowset;
-$quote;
+\$method_body\$
 SQL
-        # elog NOTICE, "Trying to create method $method_name\n";
+        elog NOTICE, <<ERR1;
+Method creation sql was
+$sql
+ERR1
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
             elog NOTICE, "Created method $method_name."
@@ -317,7 +331,7 @@ SQL
         my $shadow_table = join('_', $base_name, 'shadow');
         $sql = <<SQL;
 CREATE TABLE $shadow_table (
-  iud_action CHAR(1) CHECK(iud_action IN ('I', 'U', 'D') )
+  iud_action CHAR(1)
 , @{[ join("\n, ", map {"old_$_"} @cols) ]}
 , @{[ join("\n, ", map {"new_$_"} @cols) ]}
 )
@@ -333,7 +347,7 @@ SQL
 CREATE TRIGGER ${shadow_table}_trg
     BEFORE INSERT ON $shadow_table
     FOR EACH ROW
-    EXECUTE PROCEDURE dbi_link.shadow_trigger_func('$data_source_id')
+    EXECUTE PROCEDURE dbi_link.shadow_trigger_func($data_source_id)
 SQL
         elog NOTICE, "Trying to create trigger on shadow table\n$sql\n" if $DEBUG==1;
         $rv = spi_exec_query($sql);
@@ -342,10 +356,11 @@ SQL
         } else {
             elog ERROR, "Could not create trigger on shadow table $shadow_table.  $rv->{status}";
         }
+        my $nulls = join(", ", map {'NULL'} 1..scalar(@cols));
         $sql = <<SQL;
 CREATE RULE ${base_name}_insert AS
 ON INSERT TO $base_name DO INSTEAD
-INSERT INTO $shadow_table ('I', OLD.*, NEW.*)
+INSERT INTO $shadow_table VALUES ('I', $nulls, NEW.*)
 SQL
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
@@ -356,7 +371,7 @@ SQL
         $sql = <<SQL;
 CREATE RULE ${base_name}_update AS
 ON UPDATE TO $base_name DO INSTEAD
-INSERT INTO ${base_name}_shadow ('U', OLD.*, NEW.*)
+INSERT INTO ${base_name}_shadow VALUES ('U', OLD.*, NEW.*)
 SQL
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
@@ -367,7 +382,7 @@ SQL
         $sql = <<SQL;
 CREATE RULE ${base_name}_delete AS
 ON DELETE TO $base_name DO INSTEAD
-INSERT INTO ${base_name}_shadow ('D', OLD.*, NEW.*)
+INSERT INTO ${base_name}_shadow VALUES ('D', OLD.*, $nulls)
 SQL
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {

@@ -1,6 +1,10 @@
 If you've ever wanted to join PostgreSQL tables from other data you
 can access via Perl's DBI, this is your project.
 
+DBI-Link requires PostgreSQL 8.0 or better, and has been tested with Perl
+5.8.5.  Backports to older versions of PostgreSQL are unlikely, and earlier
+versions of Perl only if there is an excellent reason.
+
 The first milestone, which has working prototype code, is a user-visible
 function that takes a set of connection parameters to pass to DBI and a string
 of SQL. On success, it returns a SETOF RECORD [doc ref here].

@@ -265,14 +265,14 @@ AS $$
 # Immediately reject anything that's not an INSERT. #
 #                                                   #
 #####################################################
-if ($_TD{EVENT} ne 'INSERT') {
+if ($_TD->{event} ne 'INSERT') {
     return "SKIP";
 }
 
 use strict;
 use DBI;
 
-my $data_source_id = $_TD{argv}[0];
+my $data_source_id = $_[0];
 ##################################################
 #                                                #
 # Is the named driver available on this machine? #
@@ -302,7 +302,11 @@ if ($nrows == 0) {
 # Attempt to connect with the driver. #
 #                                     #
 #######################################
-my $attr = eval($dbh_attr);
+my $attr = undef;
+if (length($dbh_attr) > 0 ) {
+    $attr = eval($dbh_attr);
+}
+
 my $dbh = DBI->connect(
   $data_source
 , $user_name
