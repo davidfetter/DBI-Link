@@ -1,6 +1,14 @@
-This file represents items not yet tackled.
+This file represents items to be addressed.
 
-1.  Data type mappings for each DBI data source type:
+1.  Investigate putting $dbh handles in %_SHARED for quicker write operations.
+
+2.  Some kind of better documentation system, possibly docbook.  This should
+be able to generate HTML, PDF, POD(?) and others as needed.
+
+3.  Better testing for each foreign data source.  Should these include
+different versions of foreign data sources?
+
+4.  Data type mappings for each DBI data source type:
 
 * DB2
 * Excel(?)
@@ -11,4 +19,5 @@ This file represents items not yet tackled.
 * Oracle
 * Sybase
 
-2. Some way to materialize the foreign data source at need.
+5. Some way to materialize the foreign data source into real PostgreSQL
+tables.
