@@ -3,20 +3,24 @@ CREATE OR REPLACE FUNCTION make_accessor_functions (
 , db_user TEXT
 , db_password TEXT
 , dbh_attributes TEXT
+, remote_schema TEXT
+, remote_catalog TEXT
+, local_schema TEXT
 )
 RETURNS BOOLEAN
 LANGUAGE plperlu
 AS $$
 use DBI;
 my $dbh;
-my ($data_source, $db_user, $db_password, $dbh_attributes) = @_;
-$schema_name =~ s/'/\\'/g;
-$local_schema =~ s/'/\\'/g;
+my ($data_source, $db_user, $db_password, $dbh_attributes, $remote_schema, $remote_catalog, $local_schema) = @_;
 my $data_source_id = check_connection(
   data_source => $data_source 
 , db_user => $db_user
 , db_password => $db_password
 , dbh_attributes => $dbh_attributes
+, remote_schema => $remote_schema
+, remote_catalog => $remote_catalog
+, local_schema => $local_schema
 );
 
 create_schema(
@@ -24,8 +28,9 @@ create_schema(
 );
 
 create_accessor_methods(
-  schema_name => $schema_name
-, local_schema => $local_schema
+  local_schema => $local_schema
+, remote_schema => $remote_schema
+, remote_catalog => $remote_catalog
 );
 
 return TRUE;
@@ -36,6 +41,9 @@ sub check_connection {
     , db_user => undef
     , db_password => undef
     , dbh_attributes => undef
+    , remote_schema => undef
+    , remote_catalog => undef
+    , local_schema => undef
     , @_
     );
     my $driver = $parms{data_source};
@@ -43,7 +51,7 @@ sub check_connection {
     my $dtsql = <<SQL;
 SELECT ad
 FROM dbi_link.available_drivers() AS "ad"
-WHERE ad = quote_literal($driver)
+WHERE ad = '$driver'
 SQL
     elog NOTICE, $dtsql;
     my $driver_there = spi_exec_query($dtsql);
@@ -61,8 +69,8 @@ SQL
 # }                                                               #
 #                                                                 #
 ###################################################################
-    my $attr_href = eval{$parms{dbh_attributes}};
-    my $dbh = DBI->connect(
+    my $attr_href = eval($parms{dbh_attributes});
+    $dbh = DBI->connect(
       $parms{data_source}
     , $parms{db_user}
     , $parms{db_password}
@@ -81,12 +89,22 @@ $DBI::errstr
 ERR
     } else {
         my $sql = <<SQL;
-INSERT INTO dbi_link.dbi_connection (data_source, user_name, auth, dbh_attr)
-VALUES (
-  quote_literal($parms{data_source})
-, quote_literal($parms{db_user})
-, quote_literal($parms{db_password})
-, quote_literal($parms{dbh_attributes})
+INSERT INTO dbi_link.dbi_connection (
+  data_source
+, user_name
+, auth
+, dbh_attr
+, remote_schema
+, remote_catalog
+, local_schema
+) VALUES (
+  quote_literal('$parms{data_source}')
+, quote_literal('$parms{db_user}')
+, quote_literal('$parms{db_password}')
+, quote_literal('$parms{dbh_attributes}')
+, quote_literal('$parms{remote_schema}')
+, quote_literal('$parms{remote_catalog}')
+, quote_literal('$parms{local_schema}')
 )
 SQL
         my $result = spi_exec_query($sql);
@@ -138,12 +156,13 @@ SQL
 sub create_accessor_methods {
     my $DEBUG = 1; # Set this to 1 for more wordiness, 0 for less.
     my %parms = (
-      schema_name => undef
-    , local_schema  => undef
+      local_schema  => undef
+    , remote_schema  => undef
+    , remote_catalog  => undef
     , @_
     );
     my $types = "'TABLE','VIEW'";
-    my $sth = $dbh->table_info(undef, $parms{'schema_name'}, '%', $types);
+    my $sth = $dbh->table_info($parms{remote_catalog}, $parms{remote_schema}, '%', $types);
     my $quote = '$'x 2;
     my $set_search = <<SQL;
 SELECT set_config(
@@ -163,7 +182,7 @@ SQL
         my $type_name = join('_',$base_name,'type');
         my @cols;
         my %comments = ();
-        my $sth2 = $dbh->column_info(undef, $schema_name, $table->{TABLE_NAME}, '%');
+        my $sth2 = $dbh->column_info(undef, '%', $table->{TABLE_NAME}, '%');
 ######################################################################
 #                                                                    #
 # This part should probably refer to a whole mapping between foreign #
@@ -207,9 +226,9 @@ SQL
             elog NOTICE, $sql if $DEBUG==1;
             $rv = spi_exec_query($sql);
             if ($rv->{status} eq 'SPI_OK_UTILITY') {
-                elog NOTICE, "Created comment on $table_name.$comment" if $DEBUG==1;
+                elog NOTICE, "Created comment on $type_name.$comment" if $DEBUG==1;
             } else {
-                elog ERROR, "Could not create comment on $table_name.$comment  $rv->{status}";
+                elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
             }
         }
         my $method_name = join('_', $base_name, 'sel');
@@ -297,7 +316,7 @@ SQL
 #########################################################################
         my $shadow_table = join('_', $base_name, 'shadow');
         $sql = <<SQL;
-CREATE TABLE $shadow_table AS (
+CREATE TABLE $shadow_table (
   iud_action CHAR(1) CHECK(iud_action IN ('I', 'U', 'D') )
 , @{[ join("\n, ", map {"old_$_"} @cols) ]}
 , @{[ join("\n, ", map {"new_$_"} @cols) ]}
@@ -312,8 +331,9 @@ SQL
         }
         $sql = <<SQL;
 CREATE TRIGGER ${shadow_table}_trg
-    BEFORE INSERT ON test
-    FOR EACH ROW EXECUTE PROCEDURE dbi_link.shadow_trigger_func($data_source_id)
+    BEFORE INSERT ON $shadow_table
+    FOR EACH ROW
+    EXECUTE PROCEDURE dbi_link.shadow_trigger_func('$data_source_id')
 SQL
         elog NOTICE, "Trying to create trigger on shadow table\n$sql\n" if $DEBUG==1;
         $rv = spi_exec_query($sql);
