@@ -97,16 +97,12 @@ if ($DBI::errstr) {
     bail (header => "Cannot execute", message => $query, error => $DBI::errstr);
 }
 
-################################################################
-#                                                              #
-# Must return a reference to an array of hashrefs.             #
-# Should this be a one-off DBI feature like fetchall_arrayref? #
-#                                                              #
-################################################################
-my $rowset;
-while(my $row = $sth->fetchrow_hashref) {
-    push @$rowset, $row;
-}
+#########################################
+#                                       #
+# This next line from the DBI man page. #
+#                                       #
+#########################################
+my $rowset = $sth->fetchall_arrayref({});
 $sth->finish;
 $dbh->disconnect;
 return $rowset;
@@ -223,16 +219,7 @@ if ($DBI::errstr) {
     bail (header => "Cannot execute", message => $query, error => $DBI::errstr);
 }
 
-################################################################
-#                                                              #
-# Must return a reference to an array of hashrefs.             #
-# Should this be a one-off DBI feature like fetchall_arrayref? #
-#                                                              #
-################################################################
-my $rowset;
-while(my $row = $sth->fetchrow_hashref) {
-    push @$rowset, $row;
-}
+my $rowset = $sth->fetchall_arrayref({});
 $sth->finish;
 $dbh->disconnect;
 return $rowset;

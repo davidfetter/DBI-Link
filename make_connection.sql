@@ -287,15 +287,9 @@ Cannot prepare
 ERR2
     elog ERROR, \$err;
 }
-
-my \$rowset;
-\@\$rowset = ();
 \$sth->execute;
-
-while(my \$row = \$sth->fetchrow_hashref) {
-    push \@\$rowset, \$row;
-}
-
+my \$rowset;
+\@\$rowset =  = \$sth->fetchall_arrayref({});
 \$sth->finish;
 \$dbh->disconnect;
 return \$rowset;
