@@ -1,0 +1,16 @@
+Here is how to use what you have:
+
+As database superuser (often postgres, but check for your system), do
+the following:
+
+1.  Load PL/Perlu into your database.  See the createlang documents
+for details on how to do this.
+
+2.  Load DBI.sql, which will make the underlying methods aka functions
+available.
+
+3.  Load make_connection.sql, which will create a function called
+make_accessor_functions.
+
+4.  Invoke make_accessor_functions using a DBI source.  test_pg.sql
+has an example that's pretty certain not to work on your system.

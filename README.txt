@@ -8,9 +8,10 @@ user-visible function that takes a set of connection parameters to
 pass to DBI and a string of SQL. On success, it returns a SETOF RECORD
 [doc ref here].
 
-The second milestone, in design phase, takes a set of parameters for
-connecting to a remote data source.  It queries the data source and
-creates TYPEs and accessor FUNCTIONs for each table it finds.
+The second milestone, now with working prototype code, takes a set of
+parameters for connecting to a remote data source.  It queries the data source
+and creates TYPEs and accessor FUNCTIONs for each TABLE and VIEW it finds.
 
-The third milestone, in concept phase, will handle JOINs with remote
-data sources.
+The third milestone, in design phase, will handle JOINs with remote data
+sources.  The current idea is to use VIEW-like objects which are stored as
+above.
