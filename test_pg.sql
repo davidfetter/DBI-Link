@@ -1,13 +1,15 @@
 /* 
- * Database type:                Pg
- * Host:                         localhost
- * Port:                         5432
- * Database:                     neil
- * User:                         neil
- * Password:                     NULL
- * Remote Schema:                public
- * Remote Catalog:               NULL
- * Schema with accessor methods: neil
+ * Data source:     dbi:Pg:dbname=neil;host=localhost;port=5432
+ * User:            neil
+ * Password:        NULL
+ * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
+ * local schema:    neil
  */
 
-SELECT make_accessor_functions('Pg','localhost',5432,'neil','neil',NULL,'public',NULL,'neil');
+SELECT make_accessor_functions(
+  'dbi:Pg:dbname=neil;host=localhost;port=5432'
+, 'neil'
+, NULL
+, '{AutoCommit => 1, RaiseError => 1}'
+, neil
+);
