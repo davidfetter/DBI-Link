@@ -1,30 +1,22 @@
 CREATE OR REPLACE FUNCTION make_accessor_functions (
-  driver TEXT
-, host TEXT
-, port INTEGER
-, database TEXT
+  data_source TEXT
 , db_user TEXT
 , db_password TEXT
-, schema_name TEXT
-, catalog_name TEXT
-, local_schema TEXT
+, dbh_attributes TEXT
 )
 RETURNS BOOLEAN
 LANGUAGE plperlu
 AS $$
 use DBI;
 my $dbh;
-my ($driver, $host, $port, $database, $db_user, $db_password,
-    $schema_name, $catalog_name, $local_schema) = @_;
-$schema_name =~ s/'/''/g;
-$local_schema =~ s/'/''/g;
-check_connection(
-  driver => $driver
-, host => $host
-, port => $port
-, database => $database
+my ($data_source, $db_user, $db_password, $dbh_attributes) = @_;
+$schema_name =~ s/'/\\'/g;
+$local_schema =~ s/'/\\'/g;
+my $data_source_id = check_connection(
+  data_source => $data_source 
 , db_user => $db_user
 , db_password => $db_password
+, dbh_attributes => $dbh_attributes
 );
 
 create_schema(
@@ -40,47 +32,80 @@ return TRUE;
 
 sub check_connection {
     my %parms = (
-      driver => undef
-    , host => undef
-    , port => undef
-    , database => undef
+      data_source => undef
     , db_user => undef
     , db_password => undef
+    , dbh_attributes => undef
     , @_
     );
-    $parms{'driver'} =~ s/'/''/g;
+    my $driver = $parms{data_source};
+    $driver =~ s/^dbi:([^:]+):.*/$1/;
     my $dtsql = <<SQL;
 SELECT ad
-FROM available_drivers() AS "ad"
-WHERE ad = '$parms{"driver"}'
+FROM dbi_link.available_drivers() AS "ad"
+WHERE ad = quote_literal($driver)
 SQL
     elog NOTICE, $dtsql;
     my $driver_there = spi_exec_query($dtsql);
-    if ($driver_there->{rows}[0] == 0) {
-        elog ERROR, "Driver $parms{'driver'} is not available.  Can't look at database."
+    if ($driver_there->{processed} == 0) {
+        elog ERROR, "Driver $driver is not available.  Can't look at database."
     }
-    my $db_label = ($driver eq 'Pg')?'dbname':'database';
-    $host = (length $host)?$host:'localhost';
-    $dbh = DBI->connect(
-      "dbi:$parms{'driver'}:$db_label=$parms{'database'};host=$parms{'host'};port=$parms{'port'}"
-    , $parms{'db_user'}
-    , $parms{'db_password'}
-      { RaiseError => 0
-      , PrintError => 0
-      , AutoCommit => 0
-      }
+###################################################################
+#                                                                 #
+# $attr_ref is a hash reference plugged into the database handle. #
+# a typical $attr_ref might be:                                   #
+# {                                                               #
+#     AutoCommit => 0,                                            #
+#     RaiseError => 0,                                            #
+#     PrintError => 0                                             #
+# }                                                               #
+#                                                                 #
+###################################################################
+    my $attr_href = eval{$parms{dbh_attributes}};
+    my $dbh = DBI->connect(
+      $parms{data_source}
+    , $parms{db_user}
+    , $parms{db_password}
+    , $attr_href
     );
     if ($DBI::errstr) {
         elog ERROR, <<ERR;
 Could not connect to database
-type: $parms{'driver'}
-host: $parms{'host'}
-database: $parms{'database'}
-user: $parms{'db_user'}
-password: $parms{'db_password'}
+data source: $parms{data_source}
+user: $parms{db_user}
+password: $parms{db_password}
+dbh attributes:
+$parms{dbh_attributes}
                                                                             
 $DBI::errstr
 ERR
+    } else {
+        my $sql = <<SQL;
+INSERT INTO dbi_link.dbi_connection (data_source, user_name, auth, dbh_attr)
+VALUES (
+  quote_literal($parms{data_source})
+, quote_literal($parms{db_user})
+, quote_literal($parms{db_password})
+, quote_literal($parms{dbh_attributes})
+)
+SQL
+        my $result = spi_exec_query($sql);
+        if ($result->{status} eq 'SPI_OK_INSERT') {
+            elog NOTICE, "Stashed connection info.";
+            $sql = <<SQL;
+SELECT currval('dbi_link.dbi_connection_data_source_id_seq') AS "the_val"
+SQL
+            $result = spi_exec_query($sql);
+            if ($result->{processed} == 0) {
+                elog ERROR, "Couldn't retrieve the dbi connection id via currval()!";
+            } elsif ($result->{processed} != 1) {
+                elog ERROR, "Got >$result->{processed}< results, not 1.  This can't happen!";
+            } else {
+                return $result->{rows}[0]->{the_val};
+            }
+        } else {
+            elog ERROR, "Could not do\n$sql\n$result->{status}";
+        }
     }
 }
 
@@ -91,14 +116,14 @@ sub create_schema {
     );
     elog ERROR, "Must have a local_schema!" unless $parms{'local_schema'} =~ /\S/;
     my $sql_check_for_schema = <<SQL;
-SELECT COUNT(*) AS "cnt"
+SELECT COUNT(*) AS "the_count"
 FROM pg_namespace
-WHERE nspname = '$parms{"local_schema"}'
+WHERE nspname = '$parms{local_schema}'
 SQL
     elog NOTICE, "Attempting\n$sql_check_for_schema\n";
     my $schema_there = spi_exec_query($sql_check_for_schema);
-    if ($schema_there->{rows}[0]->{'cnt'} != 0) {
-        elog ERROR, "Schema $parms{'local_schema'} already exists.  1st row was ".$schema_there->{rows}[0]->{'cnt'};
+    if ($schema_there->{rows}[0]->{'the_count'} != 0) {
+        elog ERROR, "Schema $parms{'local_schema'} already exists.";
     } else {
         my $sql_create_schema = "CREATE SCHEMA $parms{'local_schema'}";
         my $rv = spi_exec_query($sql_create_schema);
@@ -118,14 +143,34 @@ sub create_accessor_methods {
     , @_
     );
     my $types = "'TABLE','VIEW'";
-    my $sth = $dbh->table_info($catalog_name, $parms{'schema_name'}, '%', $types);
-    my $db_label = ($driver eq 'Pg')?'dbname':'database';
-    my $f_host = (defined $host)?$host:'localhost';
+    my $sth = $dbh->table_info(undef, $parms{'schema_name'}, '%', $types);
+    my $quote = '$'x 2;
+    my $set_search = <<SQL;
+SELECT set_config(
+  'search_path'
+, '$parms{local_schema},' || current_setting('search_path')
+, false
+)
+SQL
+    my $rv = spi_exec_query($set_search);
+    if ($rv->{status} eq 'SPI_OK_SELECT') {
+        elog NOTICE, "Fixed search_path." if $DEBUG==1;
+    } else {
+        elog ERROR, "Could not fix search path.  $rv->{status}";
+    }
     while(my $table = $sth->fetchrow_hashref) {
-        my $type_name = $parms{'local_schema'}.'.'.$table->{TABLE_NAME}.'_type';
+        my $base_name = $table->{TABLE_NAME};
+        my $type_name = join('_',$base_name,'type');
         my @cols;
         my %comments = ();
         my $sth2 = $dbh->column_info(undef, $schema_name, $table->{TABLE_NAME}, '%');
+######################################################################
+#                                                                    #
+# This part should probably refer to a whole mapping between foreign #
+# database column types and PostgreSQL ones.  Meanwhile, it turns    #
+# integer-looking things into INTEGERs, everything else into TEXT.   #
+#                                                                    #
+######################################################################
         while(my $column = $sth2->fetchrow_hashref) {
             my $line = $column->{COLUMN_NAME};
             $comments{ $column->{COLUMN_NAME} } =
@@ -141,18 +186,18 @@ sub create_accessor_methods {
             push @cols, $line;
         }
         $sth2->finish;
-        my $sql = "CREATE TYPE $type_name AS (\n  "
-                . join("\n, ", @cols)
-                . "\n)"
-                ;
+        my $sql = <<SQL;
+CREATE TYPE $type_name AS (
+  @{[join("\n, ", @cols)]}
+)
+SQL
         elog NOTICE, "Trying to create type\n$sql\n" if $DEBUG==1;
-        my $rv = spi_exec_query($sql);
+        $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
             elog NOTICE, "Created type $type_name." if $DEBUG==1;
         } else {
             elog ERROR, "Could not create type $type_name.  $rv->{status}";
         }
-        my $quote = '$'x 2;
         foreach my $comment (keys %comments) {
             $sql = <<SQL;
 COMMENT ON COLUMN $type_name.$comment IS $quote
@@ -162,24 +207,23 @@ SQL
             elog NOTICE, $sql if $DEBUG==1;
             $rv = spi_exec_query($sql);
             if ($rv->{status} eq 'SPI_OK_UTILITY') {
-                elog NOTICE, "Created comment on $type_name.$comment" if $DEBUG==1;
+                elog NOTICE, "Created comment on $table_name.$comment" if $DEBUG==1;
             } else {
-                elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
+                elog ERROR, "Could not create comment on $table_name.$comment  $rv->{status}";
             }
         }
-        my $base_name = "$parms{'local_schema'}.$table->{TABLE_NAME}";
         my $method_name = join('_', $base_name, 'sel');
         $sql = <<SQL;
 CREATE OR REPLACE FUNCTION $method_name ()
 RETURNS SETOF $type_name
 LANGUAGE plperlu
-AS \$\$
+AS $quote
 use DBI;
 
 my \$dbh = DBI->connect(
-  "dbi:$driver:$db_label=$database;host=$f_host;port=$port"
-, '$db_user'
-, '$db_password'
+  $parms{data_source}
+, $parms{db_user}
+, $parms{db_password}
 , {
     RaiseError => 0
   , PrintError => 0
@@ -190,20 +234,18 @@ my \$dbh = DBI->connect(
 if (\$DBI::errstr) {
     elog ERROR, "
 Could not connect to database
-type: $driver
-host: $f_host
-database: $database
-user: $db_user
-password: $db_password
+data source: \$data_source
+user: \$db_user
+password: \$db_password
 error: \$DBI::errstr
 ";
 }
 
-elog NOTICE, "Connected to database";
+# elog NOTICE, "Connected to database";
 
-my \$sql = 'SELECT * FROM $table->{TABLE_NAME}';
+my \$sql = 'SELECT * FROM $base_name';
 
-elog NOTICE, "sql is\n\$sql";
+# elog NOTICE, "sql is\n\$sql";
 
 my \$sth = \$dbh->prepare(\$sql);
 if (\$DBI::errstr) {
@@ -216,26 +258,20 @@ Cannot prepare
 ";
 }
 
-elog NOTICE, "Prepared query";
-
 my \$rowset;
 \@\$rowset = ();
 \$sth->execute;
-
-elog NOTICE, "Started executing query";
 
 while(my \$row = \$sth->fetchrow_hashref) {
     push \@\$rowset, \$row;
 }
 
-elog NOTICE, "Finished executing query";
-
 \$sth->finish;
 \$dbh->disconnect;
 return \$rowset;
-\$\$;
+$quote;
 SQL
-        elog NOTICE, "Trying to create method $method_name\n";
+        # elog NOTICE, "Trying to create method $method_name\n";
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
             elog NOTICE, "Created method $method_name."
@@ -243,15 +279,81 @@ SQL
             elog ERROR, "Could not create method $method_name.  $rv->{status}";
         }
         $sql = <<SQL;
-CREATE VIEW ${base_name}_view AS
-SELECT * FROM $method_name()
+CREATE VIEW $base_name AS
+SELECT * FROM $method_name ()
 SQL
-        elog NOTICE, "VIEW SQL is\n$sql";
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created VIEW $method_name.";
+            elog NOTICE, "Created view $base_name."
         } else {
-            elog ERROR, "Could not create VIEW $method_name.  $rv->{status}";
+            elog ERROR, "Could not create view $base_name.  $rv->{status}";
+        }
+#########################################################################
+#                                                                       #
+# This section does INSERTs, UPDATEs and DELETEs by INSERTing into a    #
+# shadow table with an action marker.  There is a TRIGGER on the shadow #
+# table that Does The Right Thing(TM).                                  #
+#                                                                       #
+#########################################################################
+        my $shadow_table = join('_', $base_name, 'shadow');
+        $sql = <<SQL;
+CREATE TABLE $shadow_table AS (
+  iud_action CHAR(1) CHECK(iud_action IN ('I', 'U', 'D') )
+, @{[ join("\n, ", map {"old_$_"} @cols) ]}
+, @{[ join("\n, ", map {"new_$_"} @cols) ]}
+)
+SQL
+        elog NOTICE, "Trying to create shadow table $shadow_table\n$sql\n" if $DEBUG==1;
+        $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created shadow table $shadow_table." if $DEBUG==1;
+        } else {
+            elog ERROR, "Could not create shadow table $shadow_table.  $rv->{status}";
+        }
+        $sql = <<SQL;
+CREATE TRIGGER ${shadow_table}_trg
+    BEFORE INSERT ON test
+    FOR EACH ROW EXECUTE PROCEDURE dbi_link.shadow_trigger_func($data_source_id)
+SQL
+        elog NOTICE, "Trying to create trigger on shadow table\n$sql\n" if $DEBUG==1;
+        $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created trigger on shadow table $shadow_table." if $DEBUG==1;
+        } else {
+            elog ERROR, "Could not create trigger on shadow table $shadow_table.  $rv->{status}";
+        }
+        $sql = <<SQL;
+CREATE RULE ${base_name}_insert AS
+ON INSERT TO $base_name DO INSTEAD
+INSERT INTO $shadow_table ('I', OLD.*, NEW.*)
+SQL
+        my $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created INSERT rule on VIEW $base_name."
+        } else {
+            elog ERROR, "Could not create INSERT rule on VIEW $base_name.  $rv->{status}";
+        }
+        $sql = <<SQL;
+CREATE RULE ${base_name}_update AS
+ON UPDATE TO $base_name DO INSTEAD
+INSERT INTO ${base_name}_shadow ('U', OLD.*, NEW.*)
+SQL
+        my $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created UPDATE rule on VIEW $base_name."
+        } else {
+            elog ERROR, "Could not create UPDATE rule on VIEW $base_name.  $rv->{status}";
+        }
+        $sql = <<SQL;
+CREATE RULE ${base_name}_delete AS
+ON DELETE TO $base_name DO INSTEAD
+INSERT INTO ${base_name}_shadow ('D', OLD.*, NEW.*)
+SQL
+        my $rv = spi_exec_query($sql);
+        if ($rv->{status} eq 'SPI_OK_UTILITY') {
+            elog NOTICE, "Created DELETE rule on VIEW $base_name."
+        } else {
+            elog ERROR, "Could not create DELETE rule on VIEW $base_name.  $rv->{status}";
         }
     }
     $sth->finish;
