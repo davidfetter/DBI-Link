@@ -111,6 +111,7 @@ SQL
 }
 
 sub create_accessor_methods {
+    my $DEBUG = 1; # Set this to 1 for more wordiness, 0 for less.
     my %parms = (
       schema_name => undef
     , local_schema  => undef
@@ -123,13 +124,19 @@ sub create_accessor_methods {
     while(my $table = $sth->fetchrow_hashref) {
         my $type_name = $parms{'local_schema'}.'.'.$table->{TABLE_NAME}.'_type';
         my @cols;
+        my %comments = ();
         my $sth2 = $dbh->column_info(undef, $schema_name, $table->{TABLE_NAME}, '%');
         while(my $column = $sth2->fetchrow_hashref) {
             my $line = $column->{COLUMN_NAME};
+            $comments{ $column->{COLUMN_NAME} } =
+                ($DEBUG==1)
+              ? join("\n", map {"$_: $column->{$_}"} sort keys %$column)
+              : $column->{TYPE_NAME}
+              ;
             if ( $column->{TYPE_NAME} =~ /integer/i ) {
-                $line .= ' INTEGER';
+                $line .= ' INTEGER'
             } else {
-                $line .= ' TEXT';
+                $line .= ' TEXT '
             }
             push @cols, $line;
         }
@@ -138,12 +145,27 @@ sub create_accessor_methods {
                 . join("\n, ", @cols)
                 . "\n)"
                 ;
-        elog NOTICE, "Trying to create type\n$sql\n";
+        elog NOTICE, "Trying to create type\n$sql\n" if $DEBUG==1;
         my $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created type $type_name."
+            elog NOTICE, "Created type $type_name." if $DEBUG==1;
         } else {
             elog ERROR, "Could not create type $type_name.  $rv->{status}";
+        }
+        my $quote = '$'x 2;
+        foreach my $comment (keys %comments) {
+            $sql = <<SQL;
+COMMENT ON COLUMN $type_name.$comment IS $quote
+$comments{$comment}
+$quote
+SQL
+            elog NOTICE, $sql if $DEBUG==1;
+            $rv = spi_exec_query($sql);
+            if ($rv->{status} eq 'SPI_OK_UTILITY') {
+                elog NOTICE, "Created comment on $type_name.$comment" if $DEBUG==1;
+            } else {
+                elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
+            }
         }
         my $method_name = "$parms{'local_schema'}.$table->{TABLE_NAME}";
         $sql = <<SQL;
@@ -196,6 +218,7 @@ Cannot prepare
 elog NOTICE, "Prepared query";
 
 my \$rowset;
+\@\$rowset = ();
 \$sth->execute;
 
 elog NOTICE, "Started executing query";
