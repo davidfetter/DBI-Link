@@ -1,0 +1,14 @@
+This file represents items not yet tackled.
+
+1.  Data type mappings for each DBI data source type:
+
+* DB2
+* Excel(?)
+* Firebird
+* Informix
+* Microsoft SQL Server
+* MySQL
+* Oracle
+* Sybase
+
+2. Some way to materialize the foreign data source at need.

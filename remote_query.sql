@@ -256,7 +256,7 @@ This function does SELECTs on a remote data source stored in
 dbi_link.data_sources.
 $$;
 
-CREATE OR REPLACE FUNCTION shadow_trigger_func(INTEGER)
+CREATE OR REPLACE FUNCTION shadow_trigger_func()
 RETURNS TRIGGER
 LANGUAGE plperlu
 AS $$
@@ -272,7 +272,7 @@ if ($_TD{EVENT} ne 'INSERT') {
 use strict;
 use DBI;
 
-my $data_source_id = shift;
+my $data_source_id = $_TD{argv}[0];
 ##################################################
 #                                                #
 # Is the named driver available on this machine? #

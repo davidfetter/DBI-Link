@@ -15,7 +15,7 @@ SELECT set_config(
 );
 
 SELECT make_accessor_functions(
-  'dbi:dbi:Excel:file=settings.xls'
+  'dbi:Excel:file=settings.xls'
 , NULL
 , NULL
 , NULL
