@@ -52,9 +52,9 @@ sub check_connection {
     my $driver = $parms{data_source};
     $driver =~ s/^dbi:([^:]+):.*/$1/;
     my $dtsql = <<SQL;
-SELECT ad
-FROM dbi_link.available_drivers() AS "ad"
-WHERE ad = '$driver'
+SELECT available_drivers
+FROM dbi_link.available_drivers()
+WHERE available_drivers = '$driver'
 SQL
     elog NOTICE, $dtsql;
     my $driver_there = spi_exec_query($dtsql);
@@ -157,7 +157,7 @@ SQL
 }
 
 sub create_accessor_methods {
-    my $DEBUG = 0; # Set this to 1 for more wordiness, 0 for less.
+    my $DEBUG = 1; # Set this to 1 for more wordiness, 0 for less.
     my %parms = (
       local_schema  => undef
     , remote_schema  => undef
@@ -289,7 +289,7 @@ ERR2
 }
 \$sth->execute;
 my \$rowset;
-\@\$rowset =  = \$sth->fetchall_arrayref({});
+\$rowset = \$sth->fetchall_arrayref({});
 \$sth->finish;
 \$dbh->disconnect;
 return \$rowset;
