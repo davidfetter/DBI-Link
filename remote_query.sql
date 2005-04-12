@@ -37,8 +37,8 @@ $driver =~ s/^dbi:([^:]+):.*/$1/;
 #                                                #
 ##################################################
 my $dtsql = <<SQL;
-SELECT *
-FROM dbi_link.available_drivers() AS
+SELECT count(*)
+FROM dbi_link.available_drivers()
 WHERE available_drivers = '$driver'
 SQL
 my $driver_there = spi_exec_query($dtsql);
