@@ -160,7 +160,7 @@ SELECT data_source, user_name, auth, dbh_attr
 FROM dbi_link.dbi_connection
 WHERE ad = $data_source_id
 SQL
-my ($data_source, $user, $auth, $dbh_attr);
+my ($data_source, $user_name, $auth, $dbh_attr);
 my $driver_there = spi_exec_query($dtsql);
 my $nrows = $driver_there->{processed};
 if ($nrows == 0) {
@@ -270,7 +270,7 @@ SELECT data_source, user_name, auth, dbh_attr
 FROM dbi_link.dbi_connection
 WHERE ad = $data_source_id
 SQL
-my ($data_source, $user, $auth, $dbh_attr);
+my ($data_source, $user_name, $auth, $dbh_attr);
 my $driver_there = spi_exec_query($dtsql);
 my $nrows = $driver_there->{processed};
 if ($nrows == 0) {
@@ -347,18 +347,18 @@ my $iud = (
 if ($iud->{ $_TD->{'new'}{iud_action} }) {
     $iud->{ $_TD->{'new'}{iud_action} }->();
 } else {
-    elog ERROR, "Trigger event was >$_TD{'new'}{iud_action}<, but should have been one of I, U or D!"
+    elog ERROR, "Trigger event was $_TD->{'new'}{iud_action}<, but should have been one of I, U or D!"
 }
 
 return 'SKIP';
 
 sub insert {
-    my $table = $_TD{relname};
+    my $table = $_TD->{relname};
     my $sql = <<SQL;
 INSERT INTO $table (
   @{[join("\n, ", sort keys %$new) ]}
 ) VALUES (
-  @{[join("\n, ", { $new->{$_} } sort keys %$new) ]}
+  @{[join("\n, ", map { $_ = $new->{$_} } sort keys %$new) ]}
 )
 SQL
     my $sth = $dbh->prepare($sql);
@@ -366,11 +366,11 @@ SQL
 }
 
 sub update {
-    my $table = $_TD{relname}
+    my $table = $_TD->{relname};
     my $sql = <<SQL;
 UPDATE $table
 SET
-  @{[ join("\n, ", map {"$_ = $new->{$_}"} sort keys %$new) ]}
+  @{[ join("\n, ", map { $_ = $new->{$_} } sort keys %$new) ]}
 WHERE
   @{[
         join(
@@ -387,7 +387,7 @@ SQL
 }
 
 sub delete {
-    my $table = $_TD{relname}
+    my $table = $_TD->{relname};
     my $sql = <<SQL;
 DELETE FROM $table
 WHERE

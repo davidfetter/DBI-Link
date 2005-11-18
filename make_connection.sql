@@ -36,7 +36,7 @@ create_accessor_methods(
 , db_password => $db_password
 );
 
-return TRUE;
+return 'TRUE';
 
 sub check_connection {
     my %parms = (
