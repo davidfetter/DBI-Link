@@ -358,7 +358,7 @@ sub insert {
 INSERT INTO $table (
   @{[join("\n, ", sort keys %$new) ]}
 ) VALUES (
-  @{[join("\n, ", map { $_ = $new->{$_} } sort keys %$new) ]}
+  @{[join("\n, ", map { $new->{$_} } sort keys %$new) ]}
 )
 SQL
     my $sth = $dbh->prepare($sql);
@@ -370,7 +370,7 @@ sub update {
     my $sql = <<SQL;
 UPDATE $table
 SET
-  @{[ join("\n, ", map { $_ = $new->{$_} } sort keys %$new) ]}
+  @{[ join("\n, ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
 WHERE
   @{[
         join(
