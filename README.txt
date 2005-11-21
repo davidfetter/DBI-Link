@@ -15,6 +15,11 @@ schema for it, and creates VIEWs, shadow TABLEs, TYPEs and accessor FUNCTIONs
 for each TABLE and VIEW it finds by creating VIEWs and shadow TABLEs for each
 TABLE.
 
-The third milestone, in design phase, will handle JOINs with remote data
-sources.  The current idea is to use VIEW-like objects which are stored as
-above.
+The third milestone will take advantage of memory improvements to PL/Perl that
+come with PostgreSQL 8.1: spi_query() spi_fetchrow() to avoid fetching the
+entire rowset into memory, and return_next() to return rows as they arrive.
+The new release will probably also remove the eval()s from perl code,
+replacing them with some kind of serialization, possibly YAML.
+
+The fourth milestone, in design phase, will handle JOINs with remote data
+sources with some kind of predicate manipulation.
