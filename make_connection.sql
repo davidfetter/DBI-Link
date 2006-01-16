@@ -184,7 +184,7 @@ SQL
     } else {
         elog ERROR, "Could not fix search path.  $rv->{status}";
     }
-    while(my $table = $sth->fetchrow_hashref) {
+    while(my $table = $sth->fetchrow_hashref('NAME_lc')) {
         my $base_name = $table->{TABLE_NAME};
         my $type_name = join('_',$base_name,'rowtype');
         my @cols;
@@ -197,7 +197,7 @@ SQL
 # integer-looking things into INTEGERs, everything else into TEXT.   #
 #                                                                    #
 ######################################################################
-        while(my $column = $sth2->fetchrow_hashref) {
+        while(my $column = $sth2->fetchrow_hashref('NAME_lc')) {
             my $line = $column->{COLUMN_NAME};
             $comments{ $column->{COLUMN_NAME} } =
                 ($DEBUG==1)
