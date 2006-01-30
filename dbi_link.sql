@@ -36,6 +36,7 @@ CREATE OR REPLACE FUNCTION available_drivers()
 RETURNS SETOF TEXT
 LANGUAGE plperlu
 AS $$
+    require 5.8;
     use DBI;
     return \@{[ DBI->available_drivers ]};
 $$;
@@ -51,6 +52,7 @@ CREATE OR REPLACE FUNCTION data_sources(TEXT)
 RETURNS SETOF TEXT
 LANGUAGE plperlu
 AS $$
+    require 5.8;
     use DBI;
     return \@{[ DBI->data_sources($_[0]) ]};
 $$;

@@ -12,6 +12,7 @@ CREATE OR REPLACE FUNCTION remote_select (
 )
 RETURNS SETOF RECORD
 LANGUAGE plperlu AS $$
+require 5.8;
 use strict;
 use DBI;
 
@@ -135,6 +136,7 @@ CREATE OR REPLACE FUNCTION remote_select (
 )
 RETURNS SETOF RECORD
 LANGUAGE plperlu AS $$
+require 5.8;
 my($data_source_id, $query) = @_;
 ##################################################################
 #                                                                #
@@ -144,7 +146,7 @@ my($data_source_id, $query) = @_;
 ##################################################################
 if (length($query) == 0) {
     elog ERROR, 'Must issue a query!';
-} elsif ($query !~ /^select/i ) {
+} elsif ($query !~ /^\s*(select|describe|show)/i ) {
     elog ERROR, 'Must issue a SELECT query!';
 }
 
@@ -247,6 +249,7 @@ CREATE OR REPLACE FUNCTION shadow_trigger_func()
 RETURNS TRIGGER
 LANGUAGE plperlu
 AS $$
+require 5.8;
 #####################################################
 #                                                   #
 # Immediately reject anything that's not an INSERT. #
