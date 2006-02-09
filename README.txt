@@ -1,25 +1,53 @@
-If you've ever wanted to join PostgreSQL tables from other data you
-can access via Perl's DBI, this is your project.
+Here is how to use what you have:
 
-DBI-Link requires PostgreSQL 8.0 or better, and has been tested with Perl
-5.8.5.  Backports to older versions of PostgreSQL are unlikely, and earlier
-versions of Perl only if there is an excellent reason.
+As database superuser (often postgres, but check for your system), do
+the following:
 
-The first milestone, which has working prototype code, is a user-visible
-function that takes a set of connection parameters to pass to DBI and a string
-of SQL. On success, it returns a SETOF RECORD [doc ref here].
+INSTALLATION
 
-The second milestone, tagged with version 1.0, takes a set of parameters for
-connecting to a remote data source.  It queries the data source, creates a new
-schema for it, and creates VIEWs, shadow TABLEs, TYPEs and accessor FUNCTIONs
-for each TABLE and VIEW it finds by creating VIEWs and shadow TABLEs for each
-TABLE.
+1.  Load PL/Perlu into your database.  See the createlang documents
+for details on how to do this.
 
-The third milestone will take advantage of memory improvements to PL/Perl that
-come with PostgreSQL 8.1: spi_query() spi_fetchrow() to avoid fetching the
-entire rowset into memory, and return_next() to return rows as they arrive.
-The new release will probably also remove the eval()s from perl code,
-replacing them with some kind of serialization, possibly YAML.
+2.  Load dbi_link.sql, which will make the underlying methods aka functions
+available.
 
-The fourth milestone, in design phase, will handle JOINs with remote data
-sources with some kind of predicate manipulation.
+ADDING FOREIGN DB CONNECTION
+
+Do the following, with the appropriate parameters.  "Appropriate parameters"
+come from the perldoc of the appropriate DBD::Pg, except for "local schema,"
+which you must supply.  "local schema" must not yet exist.
+
+/* 
+ * Data source:     dbi:Pg:dbname=neil;host=localhost;port=5432
+ * User:            neil
+ * Password:        NULL
+ * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
+ * remote schema:   public
+ * remote catalog:  NULL
+ * local schema:    neil
+ */
+
+SELECT set_config(
+  'search_path'
+, 'dbi_link,' || current_setting('search_path')
+, false
+);
+
+SELECT make_accessor_functions(
+  'dbi:Pg:dbname=neil;host=localhost;port=5432'
+, 'neil'
+, NULL
+, '{AutoCommit => 1, RaiseError => 1}'
+, 'public'
+, NULL
+, 'neil'
+);
+
+Congratulations!  You can now access anything in the 'neil' schema for both
+read and write.
+
+USING THE FOREIGN DB CONNECTION
+
+DELETE FROM neil.person
+WHERE id < 10;
+
