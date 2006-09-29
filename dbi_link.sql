@@ -190,12 +190,12 @@ my $shared = populate_hashref();
 
 foreach my $sub (keys %$shared) {
     my $ref = ref($_SHARED{$sub});
-    # elog NOTICE, $ref;
+    elog NOTICE, $ref if $_SHARED{debug};
     if ($ref eq 'CODE') {
-        # elog NOTICE, "$sub already set.";
+        elog NOTICE, "$sub already set." if $_SHARED{debug};
     }
     else {
-        # elog NOTICE, "Setting $sub in \%_SHARED hash.";
+        elog NOTICE, "Setting $sub in \%_SHARED hash." if $_SHARED{debug};
         $_SHARED{$sub} = $shared->{$sub};
     }
 }
@@ -251,7 +251,7 @@ get_dbh => sub {
     use DBI;
     my ($connection_info) = @_;
     my $attribute_hashref;
-    elog NOTICE, "In get_dbh, input connection info is\n".Dump($connection_info);
+    elog NOTICE, "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
     ##################################################
     #                                                #
     # Here, we get the raw connection info as input. #
@@ -401,7 +401,7 @@ elog NOTICE, "In cache_connection, there's no shared dbh $_[0]";
 my $info = $_SHARED{get_connection_info}->({
     data_source_id => $_[0]
 });
-elog NOTICE, Dump($info);
+elog NOTICE, Dump($info) if $_SHARED{debug};
 
 $_SHARED{dbh}{ $_[0] } = $_SHARED{get_dbh}->(
     $info
@@ -410,8 +410,8 @@ return;
 $$;
 
 CREATE OR REPLACE FUNCTION remote_select (
-  data_source_id INTEGER,
-  query TEXT
+    data_source_id INTEGER,
+    query TEXT
 )
 RETURNS SETOF RECORD
 STRICT
@@ -426,7 +426,7 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 #                                                        #
 ##########################################################
 my $query = "SELECT cache_connection( $_[0] )";
-elog NOTICE, $query;
+elog NOTICE, $query if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 
 $_SHARED{remote_exec_dbh}->({
@@ -440,8 +440,8 @@ return;
 $$;
 
 COMMENT ON FUNCTION remote_select (
-  data_source_id INTEGER,
-  query TEXT
+    data_source_id INTEGER,
+    query TEXT
 ) IS $$
 This function does SELECTs on a remote data source stored in
 dbi_link.data_sources.
@@ -493,18 +493,18 @@ return;
 $$;
 
 COMMENT ON FUNCTION remote_select (
-  data_source TEXT,
-  user_name TEXT,
-  auth TEXT,
-  dbh_attr YAML,
-  query TEXT
+    data_source TEXT,
+    user_name TEXT,
+    auth TEXT,
+    dbh_attr YAML,
+    query TEXT
 ) IS $$
 This function does SELECTs on a remote data source de novo.
 $$;
 
 CREATE OR REPLACE FUNCTION remote_execute (
-  data_source_id INTEGER,
-  query TEXT
+    data_source_id INTEGER,
+    query TEXT
 )
 RETURNS VOID
 STRICT
@@ -528,8 +528,8 @@ return;
 $$;
 
 COMMENT ON FUNCTION remote_execute (
-  data_source_id INTEGER,
-  query TEXT
+    data_source_id INTEGER,
+    query TEXT
 ) IS $$
 This function executes non-row-returning queries on a remote data
 source stored in dbi_link.data_sources.
@@ -643,9 +643,9 @@ foreach my $key (keys %{ $_TD->{'new'} }) {
 }
 
 my $iud = (
-  I => \&insert,
-  U => \&update,
-  D => \&delete,
+    I => \&insert,
+    U => \&update,
+    D => \&delete,
 );
 
 my $table = $_TD->{relname};
@@ -662,9 +662,9 @@ return 'SKIP';
 sub insert {
     my $sql = <<SQL;
 INSERT INTO $table (
-  @{[join("\n, ", sort keys %$new) ]}
+    @{[join("\n, ", sort keys %$new) ]}
 ) VALUES (
-  @{[join(", ", map { '?' } sort keys %$new) ]}
+    @{[join(", ", map { '?' } sort keys %$new) ]}
 )
 SQL
     my $sth = $dbh->prepare($sql);
@@ -675,9 +675,9 @@ sub update {
     my $sql = <<SQL;
 UPDATE $table
 SET
-  @{[ join("\n, ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
+    @{[ join("\n, ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
 WHERE
-  @{[
+    @{[
         join(
             "\nAND ",
             map {
@@ -695,7 +695,7 @@ sub delete {
     my $sql = <<SQL;
 DELETE FROM $table
 WHERE
-  @{[
+    @{[
         join(
             "\nAND ",
             map {
@@ -712,13 +712,13 @@ SQL
 $$;
 
 CREATE OR REPLACE FUNCTION make_accessor_functions (
-  data_source TEXT,
-  user_name TEXT,
-  auth TEXT,
-  dbh_attributes TEXT,
-  remote_schema TEXT,
-  remote_catalog TEXT,
-  local_schema TEXT
+    data_source TEXT,
+    user_name TEXT,
+    auth TEXT,
+    dbh_attributes TEXT,
+    remote_schema TEXT,
+    remote_catalog TEXT,
+    local_schema TEXT
 )
 RETURNS BOOLEAN
 LANGUAGE plperlu
@@ -730,27 +730,27 @@ use YAML;
 my $dbh;
 my ($data_source, $user_name, $auth, $dbh_attributes, $remote_schema, $remote_catalog, $local_schema) = @_;
 my $data_source_id = check_connection({
-  data_source => $data_source,
-  user_name => $user_name,
-  auth => $auth,
-  dbh_attributes => $dbh_attributes,
-  remote_schema => $remote_schema,
-  remote_catalog => $remote_catalog,
-  local_schema => $local_schema
+    data_source => $data_source,
+    user_name => $user_name,
+    auth => $auth,
+    dbh_attributes => $dbh_attributes,
+    remote_schema => $remote_schema,
+    remote_catalog => $remote_catalog,
+    local_schema => $local_schema
 });
 
 create_schema({
-  local_schema => $local_schema
+    local_schema => $local_schema
 });
 
 create_accessor_methods({
-  local_schema => $local_schema,
-  remote_schema => $remote_schema,
-  remote_catalog => $remote_catalog,
-  data_source => $data_source,
-  user_name => $user_name,
-  auth => $auth,
-  data_source_id => $data_source_id,
+    local_schema => $local_schema,
+    remote_schema => $remote_schema,
+    remote_catalog => $remote_catalog,
+    data_source => $data_source,
+    user_name => $user_name,
+    auth => $auth,
+    data_source_id => $data_source_id,
 });
 
 return 'TRUE';
@@ -763,7 +763,7 @@ SELECT count(*) AS "driver_there"
 FROM dbi_link.available_drivers()
 WHERE available_drivers = $1
 SQL
-    elog NOTICE, $sql;
+    elog NOTICE, $sql if $_SHARED{debug};
     my $sth = spi_prepare($sql, 'TEXT');
     my $driver_there = spi_exec_prepared($sth, $driver);
     if ($driver_there->{processed} == 0) {
@@ -790,9 +790,9 @@ ERR
     }
     my @methods = qw(table_info column_info quote);
     foreach my $method (@methods) {
-        elog NOTICE, "Checking whether $driver has $method...";
+        elog NOTICE, "Checking whether $driver has $method..." if $_SHARED{debug};
         if ($dbh->can($method)) {
-            elog NOTICE, "$driver has $method :)";
+            elog NOTICE, "$driver has $method :)" if $_SHARED{debug};
         }
         else {
             elog ERROR, (<<ERR);
@@ -821,7 +821,7 @@ INSERT INTO dbi_link.dbi_connection (
     $7
 )
 SQL
-    elog NOTICE, $sql;
+    elog NOTICE, $sql if $_SHARED{debug};
     my $sth = spi_prepare(
         $sql,
         'TEXT',
@@ -869,7 +869,7 @@ SELECT COUNT(*) AS "the_count"
 FROM pg_namespace
 WHERE nspname = '$params->{local_schema}'
 SQL
-    elog NOTICE, "Attempting\n$sql_check_for_schema\n";
+    elog NOTICE, "Attempting\n$sql_check_for_schema\n" if $_SHARED{debug};
     my $schema_there = spi_exec_query($sql_check_for_schema);
     if ($schema_there->{rows}[0]->{'the_count'} != 0) {
         elog ERROR, "Schema $params->{'local_schema'} already exists.";
@@ -878,7 +878,7 @@ SQL
         my $sql_create_schema = "CREATE SCHEMA $params->{'local_schema'}";
         my $rv = spi_exec_query($sql_create_schema);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created schema $params->{'local_schema'}."
+            elog NOTICE, "Created schema $params->{'local_schema'}." if $_SHARED{debug}
         }
         else {
             elog ERROR, "Could not create schema $params->{'local_schema'}.  Status was\n$rv->{status}";
@@ -889,7 +889,12 @@ SQL
 sub create_accessor_methods {
     my ($params) = @_;
     my $types = "'TABLE','VIEW'";
-    my $sth = $dbh->table_info($params->{remote_catalog}, $params->{remote_schema}, '%', $types);
+    my $sth = $dbh->table_info(
+        $params->{remote_catalog},
+        $params->{remote_schema},
+        '%',
+        $types
+    );
     my $quote = '$'x 2;
     my $set_search = <<SQL;
 UPDATE
@@ -1060,4 +1065,4 @@ SQL
 
 $$;
 
-SET search_path TO DEFAULT;
+-- SET search_path TO DEFAULT;
