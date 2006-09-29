@@ -8,18 +8,28 @@
  * local schema:    neil
  */
 
-SELECT set_config(
-  'search_path'
-, 'dbi_link,' || current_setting('search_path')
-, false
-);
+UPDATE
+    pg_catalog.pg_settings
+SET
+    setting =
+        CASE WHEN setting ~ 'dbi_link'
+        THEN setting
+        ELSE 'dbi_link,' || setting
+        END
+WHERE
+    name = 'search_path'
+;
 
 SELECT make_accessor_functions(
-  'dbi:Pg:dbname=neil;host=localhost;port=5432'
-, 'neil'
-, NULL
-, '{AutoCommit => 1, RaiseError => 1}'
-, 'public'
-, NULL
-, 'neil'
+  'dbi:Pg:dbname=neil;host=localhost;port=5432',
+  'neil',
+  NULL,
+  '---
+AutoCommit: 1
+RaiseError: 1
+',
+  'public',
+  NULL,
+  'neil'
 );
+

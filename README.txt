@@ -3,15 +3,30 @@ Here is how to use what you have:
 As database superuser (often postgres, but check for your system), do
 the following:
 
-INSTALLATION
+Install DBI-Link Software:
 
-1.  Load PL/Perlu into your database.  See the createlang documents
-for details on how to do this.
+1. Create or choose a previously created database where DBI-Link will operate.
+For the rest of this document, that database's name is 'outreach'.  To create
+a new database from the shell as the postgres user, do:
 
-2.  Load dbi_link.sql, which will make the underlying methods aka functions
+    createdb outreach
+
+You can find more documents on createdb here:
+http://www.postgresql.org/docs/current/static/app-createdb.html
+
+2. As postgres, install the PL/PerlU language into that database.
+
+    createlang plperlu outreach
+
+You can find more documents on createlang here:
+http://www.postgresql.org/docs/current/static/app-createlang.html
+
+3.  Load dbi_link.sql, which will make the underlying methods aka functions
 available.
 
-ADDING FOREIGN DB CONNECTION
+    psql -f dbi_link.sql outreach
+
+Add Foreign Database Connection
 
 Do the following, with the appropriate parameters.  "Appropriate parameters"
 come from the perldoc of the appropriate DBD::Pg, except for "local schema,"
@@ -27,11 +42,13 @@ which you must supply.  "local schema" must not yet exist.
  * local schema:    neil
  */
 
-SELECT set_config(
-  'search_path'
-, 'dbi_link,' || current_setting('search_path')
-, false
-);
+UPDATE
+    pg_catalog.pg_settings
+SET
+    setting = 'dbi_link,' || setting
+WHERE
+    name = 'search_path'
+;
 
 SELECT make_accessor_functions(
   'dbi:Pg:dbname=neil;host=localhost;port=5432'
