@@ -29,42 +29,52 @@ available.
 Add Foreign Database Connection
 
 Do the following, with the appropriate parameters.  "Appropriate parameters"
-come from the perldoc of the appropriate DBD::Pg, except for "local schema,"
-which you must supply.  "local schema" must not yet exist.
+come from the perldoc of the appropriate DBD, in this case, DBD::mysql, except
+for "local schema," which you must supply.  "local schema" must not yet exist.
 
 /* 
- * Data source:     dbi:Pg:dbname=neil;host=localhost;port=5432
- * User:            neil
+ * Data source:     dbi:mysql:database=world;host=localhost
+ * User:            root
  * Password:        NULL
- * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
- * remote schema:   public
+ * dbh attributes:  {
+ *                      AutoCommit => 1,
+ *                      RaiseError => 1,
+ *                      FetchHashKeyName => "NAME_lc"
+ *                  }
+ * remote schema:   NULL
  * remote catalog:  NULL
- * local schema:    neil
+ * local schema:    world
  */
 
 UPDATE
     pg_catalog.pg_settings
 SET
-    setting = 'dbi_link,' || setting
+    setting =
+        CASE WHEN setting ~ 'dbi_link'
+        THEN setting
+        ELSE 'dbi_link,' || setting
+        END
 WHERE
     name = 'search_path'
 ;
 
 SELECT make_accessor_functions(
-  'dbi:Pg:dbname=neil;host=localhost;port=5432'
-, 'neil'
-, NULL
-, '{AutoCommit => 1, RaiseError => 1}'
-, 'public'
-, NULL
-, 'neil'
+    'dbi:mysql:database=world;host=localhost',
+    'root',
+    'foobar',
+    '---
+AutoCommit: 1
+RaiseError: 1
+FetchHashKeyName: NAME_lc
+',                           -- This is YAML.
+    NULL,
+    NULL,
+    'world'
 );
-
-Congratulations!  You can now access anything in the 'neil' schema for both
-read and write.
 
 USING THE FOREIGN DB CONNECTION
 
-DELETE FROM neil.person
+UPDATE world.country
+SET code2 = lower(code2)
 WHERE id < 10;
 
