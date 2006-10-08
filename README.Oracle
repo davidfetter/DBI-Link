@@ -1,0 +1,25 @@
+When using DBD::Oracle, you need to see to it that it will load
+correctly.  There are several ways to approach this:
+
+1.  This requires root access.  You'll do it once per machine.
+
+Source your oracle_env.sh or oracle_env.csh file.  For example:
+
+    . /usr/lib/oracle/xe/app/oracle/product/10.2.0/client/bin/oracle_env.sh
+
+Add the library to your LD_LIBRARY_PATH.  For example:
+
+    echo $ORACLE_HOME/lib >> /etc/ld.so.conf
+    /sbin/ldconfig -v
+
+2.  Before running any client you'll use to connect to Oracle, source
+your oracle_env.sh or oracle_env.csh file, for example:
+
+    . /usr/lib/oracle/xe/app/oracle/product/10.2.0/client/bin/oracle_env.sh
+
+3.  UNTESTED! Build DBD::Oracle as follows:
+
+perl Makefile.PL
+perl -pi -e 's(LD_RUN_PATH.*)(LD_RUN_PATH=$ENV{ORACLE_HOME}/bin)' Makefile
+make && make test && make install
+
