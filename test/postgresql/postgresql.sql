@@ -21,15 +21,16 @@ WHERE
 ;
 
 SELECT make_accessor_functions(
-  'dbi:Pg:dbname=neil;host=localhost;port=5432',
-  'neil',
-  NULL,
-  '---
+    'dbi:Pg:dbname=neil;host=localhost;port=5432',
+    'neil',
+    NULL,
+    '---
 AutoCommit: 1
 RaiseError: 1
 ',
-  'public',
-  NULL,
-  'neil'
+    NULL,
+    'public',
+    NULL,
+    'neil'
 );
 
