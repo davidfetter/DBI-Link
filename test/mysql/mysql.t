@@ -5,12 +5,12 @@ use warnings;
 $|++;
 use DBI;
 my $dbh = DBI->connect(
-    'dbi:mysql:database=world;host=localhost',
+    'dbi:mysql:database=sakila;host=localhost',
     'root',
-    undef,
+    'foobar',
     {
+        AutoCommit => 1,
         RaiseError => 1,
-        FetchHashKeyName => 'NAME_lc',
     }
 );
 
@@ -18,14 +18,15 @@ my @methods = qw(table_info column_info);
 foreach my $method (@methods) {
      if ( $dbh->can($method) ) {
          print "Handle has method $method. w00t!"
-     } else {
+     }
+     else {
          $dbh->disconnect;
          print "Sadly, handle does not have method $method. D'oh!";
          exit;
      }
 }
 
-my $sth_table=$dbh->table_info('%', '%', '%', 'TABLE');
+my $sth_table=$dbh->table_info('%', '%', '%', "'TABLE','VIEW'");
 my $sth_column;
 while(my $table = $sth_table->fetchrow_hashref) {
     print "Table $table->{TABLE_NAME}";

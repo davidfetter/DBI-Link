@@ -12,7 +12,7 @@ UPDATE
     pg_catalog.pg_settings
 SET
     setting =
-        CASE WHEN setting ~ 'dbi_link'
+        CASE WHEN 'dbi_link' = ANY(string_to_array(setting, ','))
         THEN setting
         ELSE 'dbi_link,' || setting
         END
@@ -21,15 +21,15 @@ WHERE
 ;
 
 SELECT make_accessor_functions(
-    'dbi:mysql:database=world;host=localhost',
+    'dbi:mysql:database=sakila;host=localhost',
     'root',
     'foobar',
     '---
 AutoCommit: 1
 RaiseError: 1
-FetchHashKeyName: NAME_lc
 ',
     NULL,
     NULL,
-    'world'
+    NULL,
+    'sakila'
 );
