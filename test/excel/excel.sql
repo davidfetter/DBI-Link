@@ -8,14 +8,21 @@
  * local schema:    excel
  */
 
-SELECT set_config(
-  'search_path'
-, 'dbi_link,' || current_setting('search_path')
-, false
-);
+UPDATE
+    pg_catalog.pg_settings
+SET
+    setting =
+        CASE WHEN 'dbi_link' = ANY(string_to_array(setting, ','))
+        THEN setting
+        ELSE 'dbi_link,' || setting
+        END
+WHERE
+    name = 'search_path'
+;
 
 SELECT make_accessor_functions(
   'dbi:Excel:file=settings.xls'
+, NULL
 , NULL
 , NULL
 , NULL
