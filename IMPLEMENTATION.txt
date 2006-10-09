@@ -8,35 +8,37 @@ This file describes how the DBI-Link machinery works.
 
 1. Introduction
 
-DBI-Link, as implied by the name, uses the Perl module DBI to link to foreign
+DBI-Link, as implied by the name, uses the Perl module DBI to link to remote
 data sources, of which there are many, and treat them as PostgreSQL tables.
 
 To do this, you create once per database an underlying dbi_link schema
 described below with an initialization script, dbi_link.sql, which contains a
-table and some functions.  For each foreign data source, you must call an
+table and some functions.  For each remote data source, you must call an
 initialization function called make_accessor_functions, described below, which
-creates a separate schema for each foreign data source.
+creates a separate schema for each remote data source.
 
 This initialization creates the following entities for each table.
 
 * a rowtype
-* a set-returning function which returns that rowtype
 * a VIEW, which has
    - SELECT from the above SRF
    - RULEs for INSERT, UPDATE and DELETE that write to...
 * a "shadow table," which has...
-* a TRIGGER, which does write operations on the foreign tables.
+* a TRIGGER, which does write operations on the remote tables.
 
-INSERT, UPDATE and DELETE operations on the foreign tables work via a somewhat
-complicated system.  On each VIEW corresponding to a table, there are INSERT,
-UPDATE and DELETE RULEs which write to a "shadow table."  Each "shadow table,"
-in turn, has a BEFORE INSERT trigger which does the INSERT, UPDATE or DELETE
-on the foreign table, but does not write to the "shadow table" itself.  Kudos
-to Andrew of Supernews for coming up with this concept.
+INSERT, UPDATE and DELETE operations on the remote tables work as follows:
 
-Each "shadow table" corresponds to a foreign table, and has 2n+1 columns in it,
-where n is the number of columns in the foreign table.  These columns
-correspond to the action to be taken on the foreign table, which is one of
+1. On each VIEW corresponding to a table in the remote database, there are
+INSERT, UPDATE and DELETE RULEs, all of which INSERT into a "shadow table."
+
+2. Each "shadow table," in turn, has a BEFORE INSERT trigger which does the
+INSERT, UPDATE or DELETE on the remote table, but does not write to the
+"shadow table" itself.  Kudos to Andrew of Supernews for coming up with this
+concept.
+
+Each "shadow table" corresponds to a remote table, and has 2n+1 columns in it,
+where n is the number of columns in the remote table.  These columns
+correspond to the action to be taken on the remote table, which is one of
 INSERT, UPDATE and DELETE, a set of columns corresponding to the OLD values in
 the table (all NULL for INSERTs), and a set of columns corresponding to the
 NEW values in the table (all NULL for DELETEs)
@@ -44,45 +46,107 @@ NEW values in the table (all NULL for DELETEs)
 
 2. dbi_link schema
 
-This table holds connection information.
 
-                                     Table "dbi_link.dbi_connection"
-     Column     |  Type   |                                  Modifiers                                   
-----------------+---------+------------------------------------------------------------------------------
- data_source_id | integer | not null default nextval('dbi_link.dbi_connection_data_source_id_seq'::text)
- data_source    | text    | not null
- user_name      | text    | 
- auth           | text    | 
- dbh_attr       | text    | 
- remote_schema  | text    | 
- remote_catalog | text    | 
- local_schema   | text    | 
-Indexes:
-    "dbi_connection_pkey" PRIMARY KEY, btree (data_source_id)
-    "dbi_connection_data_source_key" UNIQUE, btree (data_source, user_name)
-
-The schema also contains several functions:
-                                        List of functions
-  Schema  |          Name           | Result data type |           Argument data types            
-----------+-------------------------+------------------+------------------------------------------
- dbi_link | available_drivers       | setof text       | 
- dbi_link | data_sources            | setof text       | text
- dbi_link | make_accessor_functions | boolean          | text, text, text, text, text, text, text
- dbi_link | remote_select           | setof record     | integer, text
- dbi_link | remote_select           | setof record     | text, text, text, text, text
- dbi_link | shadow_trigger_func     | "trigger"        | 
-(6 rows)
+The schema contains several functions:
+                                                  List of functions
+  Schema  |              Name              | Result data type |                  Argument data types
+----------+--------------------------------+------------------+-------------------------------------------------------
+ dbi_link | add_dbi_connection_environment | void             | bigint, yaml
+ dbi_link | available_drivers              | setof text       |
+ dbi_link | cache_connection               | void             | integer
+ dbi_link | data_sources                   | setof text       | text
+ dbi_link | dbi_link_init                  | void             |
+ dbi_link | is_data_source                 | boolean          | text
+ dbi_link | is_yaml                        | boolean          | text
+ dbi_link | make_accessor_functions        | boolean          | data_source, text, text, yaml, yaml, text, text, text
+ dbi_link | remote_execute                 | void             | integer, text
+ dbi_link | remote_select                  | setof record     | integer, text
+ dbi_link | remote_select                  | setof record     | text, text, text, yaml, text
+ dbi_link | shadow_trigger_func            | "trigger"        |
+ dbi_link | version_integer                | integer          |
+ dbi_link | yaml_result_set                | yaml             | text
+(14 rows)
 
 * available_drivers
-     thin wrapper around the DBI function of the same name.
+    thin wrapper around the DBI function of the same name.
 * data_sources
     thin wrapper around the DBI function of the same name.
+* dbi_link_init
+    sets up all the functionality in %_SHARED
+* cache_connection
+    takes a data_source_id and makes sure its database handle is available, for
+    some value of 'makes sure.'
 * make_accessor_functions
     setup script which takes input parameters described in USAGE.txt and sets up a
-    new schema for foreign data sources, details of which are described below.
+    new schema for remote data sources, details of which are described below.
 * remote_select
     two versions of this, one with a fully qualified paramaters to make a
     database handle in DBI, the other with a data_source_id.  Each ends with a
     piece of SQL as its last parameter.
+* remote_execute
+    just one version of this, takes a data_source_id and a hunk of
+    non-row-returning SQL.
+* is_data_source, is_yaml
+    used to create DATA_SOURCE and YAML domains respectively.
 * shadow_trigger_func
-    the meat of the write operations on foreign data sources.
+    the meat of the write operations on remote data sources.
+* version_integer
+    gets the current version of PostgreSQL as an integer for comparison.  See
+    table min_pg_version below.
+* yaml_result_set
+    takes a row-returning query as text input, returns the results as a YAML.
+
+These are some new DOMAINs used in DBI-Link:
+
+                             List of domains
+  Schema  |    Name     | Type | Modifier |             Check
+----------+-------------+------+----------+-------------------------------
+ dbi_link | data_source | text |          | CHECK (is_data_source(VALUE))
+ dbi_link | yaml        | text |          | CHECK (is_yaml(VALUE))
+(2 rows)
+
+This table contains the minimum PostgreSQL version that DBI-Link will run under.
+
+   Table "dbi_link.min_pg_version"
+     Column     |  Type   | Modifiers
+----------------+---------+-----------
+ min_pg_version | integer | not null
+Rules:
+    min_pg_version_no_delete AS
+    ON DELETE TO min_pg_version DO INSTEAD NOTHING
+    min_pg_version_no_insert AS
+    ON INSERT TO min_pg_version DO INSTEAD NOTHING
+    min_pg_version_no_update AS
+    ON UPDATE TO min_pg_version DO INSTEAD NOTHING
+
+This table holds some connection information.
+
+                                    Table "dbi_link.dbi_connection"
+     Column     |    Type     |                                Modifiers
+----------------+-------------+-------------------------------------------------------------------------
+ data_source_id | integer     | not null default nextval('dbi_connection_data_source_id_seq'::regclass)
+ data_source    | data_source | not null
+ user_name      | text        |
+ auth           | text        |
+ dbh_attributes | yaml        |
+ remote_schema  | text        |
+ remote_catalog | text        |
+ local_schema   | text        |
+Indexes:
+    "dbi_connection_pkey" PRIMARY KEY, btree (data_source_id)
+    "dbi_connection_data_source_key" UNIQUE, btree (data_source, user_name)
+
+This table holds environment information for each connection.
+
+    Table "dbi_link.dbi_connection_environment"
+     Column     |  Type   | Modifiers
+----------------+---------+-----------
+ data_source_id | integer | not null
+ env_name       | text    | not null
+ env_value      | text    | not null
+ env_action     | text    | not null
+Check constraints:
+    "dbi_connection_environment_env_action_check" CHECK (env_action = 'overwrite'::text OR env_action = 'prepend'::text OR env_action = 'append'::text)
+Foreign-key constraints:
+    "dbi_connection_environment_data_source_id_fkey" FOREIGN KEY (data_source_id) REFERENCES dbi_connection(data_source_id) ON UPDATE CASCADE ON DELETE CASCADE
+
