@@ -17,7 +17,7 @@ SET
 WHERE
     name = 'search_path';
 
-CREATE OR REPLACE FUNCTION version_integer()
+CREATE OR REPLACE FUNCTION dbi_link.version_integer()
 RETURNS INTEGER
 STRICT
 LANGUAGE sql
@@ -39,36 +39,36 @@ FROM
     generate_series(1,3) AS s(i);
 $$;
 
-COMMENT ON FUNCTION version_integer() IS $$
+COMMENT ON FUNCTION dbi_link.version_integer() IS $$
 This gets the integer version number e.g. 80200.  It will be used for
 turning on/off PostgreSQL version-specific goodies.  Thanks to Andrew
 of Supernews for this.
 $$;
 
-CREATE TABLE min_pg_version (
+CREATE TABLE dbi_link.min_pg_version (
     min_pg_version INTEGER NOT NULL
 );
 
-INSERT INTO min_pg_version (min_pg_version)
-VALUES (80200);
+INSERT INTO dbi_link.min_pg_version (min_pg_version)
+VALUES (80104);
 
 CREATE RULE min_pg_version_no_insert AS
-    ON INSERT TO min_pg_version
+    ON INSERT TO dbi_link.min_pg_version
     DO INSTEAD NOTHING;
 
 CREATE RULE min_pg_version_no_update AS
-    ON UPDATE TO min_pg_version
+    ON UPDATE TO dbi_link.min_pg_version
     DO INSTEAD NOTHING;
 
 CREATE RULE min_pg_version_no_delete AS
-    ON DELETE TO min_pg_version
+    ON DELETE TO dbi_link.min_pg_version
     DO INSTEAD NOTHING;
 
-COMMENT ON TABLE min_pg_version IS
+COMMENT ON TABLE dbi_link.min_pg_version IS
 $$This table contains exactly one row: the minimum version of
 PostgreSQL required to use this version of DBI-Link.$$;
 
-CREATE OR REPLACE FUNCTION is_yaml(TEXT)
+CREATE OR REPLACE FUNCTION dbi_link.is_yaml(TEXT)
 RETURNS boolean
 STRICT
 LANGUAGE plperlu
@@ -85,7 +85,7 @@ if ($@) {
 return 1;
 $$;
 
-COMMENT ON FUNCTION is_yaml(TEXT) IS $$
+COMMENT ON FUNCTION dbi_link.is_yaml(TEXT) IS $$
 Pretty self-explanatory ;)
 $$;
 
@@ -94,11 +94,11 @@ CREATE DOMAIN yaml AS TEXT
         dbi_link.is_yaml(VALUE)
     );
 
-COMMENT ON DOMAIN yaml IS $$
+COMMENT ON DOMAIN dbi_link.yaml IS $$
 Pretty self-explanatory ;)
 $$;
 
-CREATE OR REPLACE FUNCTION is_data_source(TEXT)
+CREATE OR REPLACE FUNCTION dbi_link.is_data_source(TEXT)
 RETURNS boolean
 STRICT
 LANGUAGE plperlu
@@ -111,44 +111,203 @@ if (defined @args) {
 return 0;
 $$;
 
-COMMENT ON FUNCTION is_data_source(TEXT) IS $$
+COMMENT ON FUNCTION dbi_link.is_data_source(TEXT) IS $$
 Pretty self-explanatory ;)
 $$;
 
-CREATE DOMAIN data_source AS TEXT
+CREATE DOMAIN dbi_link.data_source AS TEXT
     CHECK (
         dbi_link.is_data_source(VALUE)
     );
 
-COMMENT ON DOMAIN data_source IS $$
+COMMENT ON DOMAIN dbi_link.data_source IS $$
 Pretty self-explanatory ;)
 $$;
 
-CREATE TABLE dbi_connection (
+CREATE TABLE dbi_link.dbi_connection (
     data_source_id SERIAL PRIMARY KEY,
     data_source DATA_SOURCE NOT NULL,
     user_name TEXT,
     auth TEXT,
-    dbh_attr YAML,
-    environment YAML,
+    dbh_attributes YAML,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT,
     UNIQUE(data_source, user_name)
 );
 
-COMMENT ON TABLE dbi_connection IS
+COMMENT ON TABLE dbi_link.dbi_connection IS
 $$This table contains the necessary connection information for a DBI
-connection.  For now, dbh_attr is a YAML <http://www.yaml.org>
-representation of the DBI database handle attributes, as it allows
+connection.  The dbh_attributes is a YAML <http://www.yaml.org>
+representation of the DBI database handle attributes which allows
 maximum flexibility while ensuring some modicum of safety.$$;
+
+CREATE TABLE dbi_link.dbi_connection_environment (
+    data_source_id INTEGER NOT NULL
+                   REFERENCES dbi_link.dbi_connection(data_source_id)
+                   ON DELETE CASCADE
+                   ON UPDATE CASCADE,
+    env_name   TEXT NOT NULL,
+    env_value  TEXT NOT NULL,
+    env_action TEXT NOT NULL CHECK(
+        env_action IN (
+            'overwrite',  -- Set the envonment variable to this.
+            'prepend',    -- Prepend this to the environment variable with a ':' separator if it is not already there.
+            'append'      -- Append this to the environment variable with a ':' separator if it is not already there.
+        )
+    )
+);
+
+COMMENT ON TABLE dbi_link.dbi_connection_environment
+IS $$Environment settings for a $dbh$$;
+
+CREATE OR REPLACE FUNCTION dbi_link.add_dbi_connection_environment(
+    in_data_source_id BIGINT,
+    in_settings YAML
+)
+RETURNS VOID
+LANGUAGE plperlU
+AS $$
+my ($data_source_id, $settings_yaml) = @_;
+
+return unless (defined  $settings_yaml);
+
+my $settings = Load($settings_yaml);
+elog NOTICE, Dump($settings) if $_SHARED{debug};
+elog ERROR, "In dbi_link.add_dbi_connection_environment, settings is a >@{[ref($settings)]}<, not an array reference"
+    unless (ref($settings) eq 'ARRAY');
+my $count = 0;
+foreach my $setting (@$settings) {
+    elog ERROR, "In dbi_link.add_dbi_connection_environment, setting $count is not even a hash reference"
+        unless (ref($settings) eq 'HASH');
+    elog ERROR, "In dbi_link.add_dbi_connection_environment, setting $count does have the proper components"
+        unless (
+            exists $settings->{env_name} &&
+            exists $settings->{env_value} &&
+            exists $settings->{env_action}
+        );
+    elog ERROR, "In dbi_link.add_dbi_connection_environment, setting $count does have the proper right-hand sides"
+        if (
+            ref($settings->{env_name}) ||
+            ref($settings->{env_value}) ||
+            ref($settings->{env_action})
+        );
+    foreach my $setting (qw(env_name env_value env_action)) {
+        if (defined $settings->{$setting}) {
+            $settings->{$setting} = $_SHARED{quote_literal}->(
+                $settings->{$setting}
+            );
+        }
+        else {
+            $settings->{$setting} = 'NULL';
+        }
+    }
+    my $sql = <<SQL;
+INSERT INTO dbi_link.dbi_connection_environment (
+    data_source_id,
+    env_name,
+    env_value,
+    env_action
+)
+VALUES (
+    $data_source_id,
+    $settings->{env_name},
+    $settings->{env_value},
+    $settings->{env_action}
+)
+SQL
+    elog NOTICE, "In dbi_link.add_dbi_connection_environment, executing:\n$sql";
+    my $rv = spi_exec_query($sql);
+    if ($rv->{status} ne 'SPI_OK_INSERT') {
+        elog ERROR, "In dbi_link.add_dbi_connection_environment, could not insert into dbi_link.dbi_connection_environment: $rv->{status}";
+    }
+}
+return;
+$$;
+
+CREATE OR REPLACE FUNCTION dbi_link.yaml_result_set(in_query TEXT)
+RETURNS YAML
+LANGUAGE plperlU
+AS $$
+use YAML;
+my $rv = spi_exec_query($_[0]);
+if ($rv->{processed} > 0) {
+    return Dump($rv->{rows});
+}
+else {
+    return undef;
+}
+$$;
+
+COMMENT ON FUNCTION dbi_link.yaml_result_set(in_query TEXT)
+IS $$
+This takes a query as input and returns yaml that rolls up all the
+records.
+$$;
+
+CREATE VIEW dbi_link.dbi_all_connection_info AS
+SELECT
+    c.data_source_id,
+    c.data_source,
+    c.user_name,
+    c.auth,
+    c.dbh_attributes,
+    c.remote_schema,
+    c.remote_catalog,
+    c.local_schema,
+    dbi_link.yaml_result_set(
+        'SELECT
+            env_name, env_value, env_action
+        FROM
+            dbi_link.dbi_connection_environment
+        WHERE
+            data_source_id = ' || c.data_source_id
+    ) AS dbi_connection_environment
+FROM
+    dbi_link.dbi_connection c
+;
+
+COMMENT ON VIEW dbi_link.dbi_all_connection_info IS
+$$Rollup of the whole connection_info object.$$;
+
+CREATE RULE dbi_all_connection_info_insert AS
+    ON INSERT TO dbi_link.dbi_all_connection_info
+    DO INSTEAD (
+        INSERT INTO dbi_link.dbi_connection (
+            data_source,
+            user_name,
+            auth,
+            dbh_attributes,
+            remote_schema,
+            remote_catalog,
+            local_schema
+        )
+        VALUES (
+            NEW.data_source,
+            NEW.user_name,
+            NEW.auth,
+            NEW.dbh_attributes,
+            NEW.remote_schema,
+            NEW.remote_catalog,
+            NEW.local_schema
+        );
+        SELECT dbi_link.add_dbi_connection_environment(
+            pg_catalog.currval(
+                pg_catalog.pg_get_serial_sequence(
+                    'dbi_link.dbi_connection',
+                    'data_source_id'
+                )
+            ),
+            NEW.dbi_connection_environment
+        )
+    );
 
 --------------------------------------
 --                                  --
 --  PL/PerlU Interface to DBI. :)   --
 --                                  --
 --------------------------------------
-CREATE OR REPLACE FUNCTION available_drivers()
+CREATE OR REPLACE FUNCTION dbi_link.available_drivers()
 RETURNS SETOF TEXT
 LANGUAGE plperlu
 AS $$
@@ -157,14 +316,14 @@ AS $$
     return \@{[ DBI->available_drivers ]};
 $$;
 
-COMMENT ON FUNCTION available_drivers() IS $$
+COMMENT ON FUNCTION dbi_link.available_drivers() IS $$
 This is a wrapper around the DBI function of the same name which
 returns a list (SETOF TEXT) of DBD:: drivers available through DBI on
 your machine.  This is used internally and is unlikely to be called
 directly.
 $$;
 
-CREATE OR REPLACE FUNCTION data_sources(TEXT)
+CREATE OR REPLACE FUNCTION dbi_link.data_sources(TEXT)
 RETURNS SETOF TEXT
 LANGUAGE plperlu
 AS $$
@@ -173,7 +332,7 @@ AS $$
     return \@{[ DBI->data_sources($_[0]) ]};
 $$;
 
-COMMENT ON FUNCTION data_sources(TEXT) IS $$
+COMMENT ON FUNCTION dbi_link.data_sources(TEXT) IS $$
 This is a wrapper around the DBI function of the same name.  It takes
 as input one of the rows from available_drivers() and returns known
 data sources for that driver.  You will probably not call this
@@ -185,7 +344,18 @@ RETURNS VOID
 LANGUAGE plperlu
 AS $$
 $_SHARED{debug} = 1;
+$_SHARED{min_pg_version} = spi_exec_query('SELECT min_pg_version FROM dbi_link.min_pg_version')
+    ->{rows}
+    ->[0]
+    ->{min_pg_version };
+$_SHARED{server_version} = spi_exec_query('SELECT version_integer()')
+    ->{rows}
+    ->[0]
+    ->{version_integer};
 
+if ( $_SHARED{server_version} < $_SHARED{min_pg_version} ) {
+    elog ERROR, "Server version is $_SHARED{server_version}.  You need at least $_SHARED{min_pg_version} to run DBI-Link.";
+}
 my $shared = populate_hashref();
 
 foreach my $sub (keys %$shared) {
@@ -227,7 +397,10 @@ SELECT
     data_source,
     user_name,
     auth,
-    dbh_attr
+    dbh_attributes,
+    remote_schema,
+    remote_catalog,
+    local_schema
 FROM
     dbi_link.dbi_connection
 WHERE
@@ -261,13 +434,47 @@ get_dbh => sub {
         defined $connection_info->{data_source} &&  # NOT NULL
         exists $connection_info->{user_name}    &&
         exists $connection_info->{auth}         &&
-        exists $connection_info->{dbh_attr}
+        exists $connection_info->{dbh_attributes}
     ) {
-        elog ERROR, "You must provide all of data_source, user_name, auth and dbh_attr to get a database handle.";
+        elog ERROR, "You must provide all of data_source, user_name, auth and dbh_attributes to get a database handle.";
+    }
+
+    if (defined $connection_info->{dbi_connection_environment}) {
+        elog ERROR, "In get_dbh, dbi_connection_environment must be an array reference."
+            unless (ref($connection_info->{dbi_connection_environment}) eq 'ARRAY');
+        foreach my $setting (@$connection_info->{dbi_connection_environment}) {
+            foreach my $key (qw(env_name env_value env_action)) {
+                elog ERROR, "In get_dbh, missing key $key"
+                    unless (defined $setting->{$key});
+            }
+            if ($setting->{env_action} eq 'overwrite') {
+                $ENV{ $setting->{env_name} } = $setting->{env_value};
+            }
+            elsif (
+                $setting->{env_action} eq 'prepend'
+            ) {
+                if ($ENV{ $setting->{env_name} } !~ /$setting->{env_value}/) {
+                    $ENV{ $setting->{env_name} } =
+                        $setting->{env_value} .
+                        $ENV{ $setting->{env_name} }
+                        ;
+                }
+            }
+            elsif (
+                $setting->{env_action} eq 'append'
+            ) {
+                if ($ENV{ $setting->{env_name} } !~ /$setting->{env_value}/) {
+                    $ENV{ $setting->{env_name} } .= $setting->{env_value};
+                }
+            }
+            else {
+                elog ERROR, "In get_dbh, env_action may only be one of {overwrite, prepend, append}.";
+            }
+        }
     }
 
     $attribute_hashref = Load(
-        $connection_info->{dbh_attr}
+        $connection_info->{dbh_attributes}
     );
     my $dbh = DBI->connect(
         $connection_info->{data_source},
@@ -282,7 +489,7 @@ Could not connect with parameters
 data_source: $connection_info->{data_source}
 user_name: $connection_info->{user_name}
 auth: $connection_info->{auth}
-dbh_attr: $connection_info->{dbh_attr}
+dbh_attributes: $connection_info->{dbh_attributes}
 ERROR
     }
     return $dbh;
@@ -336,7 +543,25 @@ remote_exec_dbh => sub {
     }
     return;
 },
+
+quote_ident => sub {
+    $_[0] =~ s/'/''/g; # Just in case
+    return spi_exec_query(
+        "SELECT pg_catalog.quote_ident('$_[0]') AS foo",
+        1
+    )->{rows}[0]{foo};
+},
+
+quote_literal => sub {
+    $_[0] =~ s/'/''/g; # Just in case
+    return spi_exec_query(
+        "SELECT pg_catalog.quote_literal('$_[0]') AS foo",
+        1
+    )->{rows}[0]{foo};
+},
+
 };
+
 }
 
 $$;
@@ -357,7 +582,10 @@ get_connection_info:
         data_source TEXT
         user_name TEXT
         auth TEXT
-        dbh_attr YAML
+        dbh_attributes YAML
+        remote_schema TEXT
+        remote_catalog TEXT
+        local_schema TEXT
 
 get_dbh:
     This takes the output of get_connection_info or equivalent data
@@ -368,7 +596,7 @@ get_dbh:
         data_source TEXT
         user_name TEXT
         auth TEXT
-        dbh_attr YAML
+        dbh_attributes YAML
     Output:
         a dbh (perl structure)
 
@@ -381,11 +609,25 @@ remote_exec_dbh:
         query TEXT NOT NULL
         returns_rows BOOLEAN NOT NULL
     Output:
-        VOID
+        undef
+
+quote_ident:
+    Perl function which wraps SQL function of the same name.
+    Input:
+        raw_identifier TEXT
+    Output:
+        quoted_identifier TEXT
+
+quote_literal:
+    Perl function which wraps SQL function of the same name.
+    Input:
+        raw_literal TEXT
+    Output:
+        quoted_literal TEXT
 
 $$;
 
-CREATE OR REPLACE FUNCTION cache_connection(
+CREATE OR REPLACE FUNCTION dbi_link.cache_connection(
     in_data_source_id INTEGER
 )
 RETURNS VOID
@@ -409,7 +651,7 @@ $_SHARED{dbh}{ $_[0] } = $_SHARED{get_dbh}->(
 return;
 $$;
 
-CREATE OR REPLACE FUNCTION remote_select (
+CREATE OR REPLACE FUNCTION dbi_link.remote_select (
     data_source_id INTEGER,
     query TEXT
 )
@@ -439,7 +681,7 @@ return;
 
 $$;
 
-COMMENT ON FUNCTION remote_select (
+COMMENT ON FUNCTION dbi_link.remote_select (
     data_source_id INTEGER,
     query TEXT
 ) IS $$
@@ -447,11 +689,11 @@ This function does SELECTs on a remote data source stored in
 dbi_link.data_sources.
 $$;
 
-CREATE OR REPLACE FUNCTION remote_select (
+CREATE OR REPLACE FUNCTION dbi_link.remote_select (
     data_source TEXT,
     user_name TEXT,
     auth TEXT,
-    dbh_attr YAML,
+    dbh_attributes YAML,
     query TEXT
 )
 RETURNS SETOF RECORD
@@ -479,7 +721,7 @@ my $dbh = $_SHARED{get_dbh}->({
     data_source => $_[0],
     user_name => $_[1],
     auth => $_[2],
-    dbh_attr => $_[3],
+    dbh_attributes => $_[3],
 });
 
 my $sth = $dbh->prepare($params->{query});
@@ -492,17 +734,17 @@ $dbh->disconnect;
 return;
 $$;
 
-COMMENT ON FUNCTION remote_select (
+COMMENT ON FUNCTION dbi_link.remote_select (
     data_source TEXT,
     user_name TEXT,
     auth TEXT,
-    dbh_attr YAML,
+    dbh_attributes YAML,
     query TEXT
 ) IS $$
 This function does SELECTs on a remote data source de novo.
 $$;
 
-CREATE OR REPLACE FUNCTION remote_execute (
+CREATE OR REPLACE FUNCTION dbi_link.remote_execute (
     data_source_id INTEGER,
     query TEXT
 )
@@ -527,7 +769,7 @@ $_SHARED{remote_exec_dbh}->({
 return;
 $$;
 
-COMMENT ON FUNCTION remote_execute (
+COMMENT ON FUNCTION dbi_link.remote_execute (
     data_source_id INTEGER,
     query TEXT
 ) IS $$
@@ -535,7 +777,7 @@ This function executes non-row-returning queries on a remote data
 source stored in dbi_link.data_sources.
 $$;
 
-CREATE OR REPLACE FUNCTION shadow_trigger_func()
+CREATE OR REPLACE FUNCTION dbi_link.shadow_trigger_func()
 RETURNS TRIGGER
 LANGUAGE plperlu
 AS $$
@@ -549,108 +791,57 @@ if ($_TD->{event} ne 'INSERT') {
     return "SKIP";
 }
 
-use DBI;
-
-my $data_source_id = $_[0];
-my $dbh;
-if ( defined $_SHARED{dbh}{$data_source_id} ) {
-    $dbh = $_SHARED{dbh}{$data_source_id}
-}
-else {
-    ##################################################
-    #                                                #
-    # Is the named driver available on this machine? #
-    #                                                #
-    ##################################################
-    my $sql = <<SQL;
-    SELECT data_source, user_name, auth, dbh_attr
-    FROM dbi_link.dbi_connection
-    WHERE data_source_id = $data_source_id
-SQL
-    my ($data_source, $user_name, $auth, $dbh_attr);
-    my $driver_there = spi_exec_query($sql);
-    my $nrows = $driver_there->{processed};
-    if ($nrows == 0) {
-        $_SHARED{bail}->({
-            message => "No such database connection as $data_source_id!",
-        });
-    }
-    elsif ($nrows != 1) {
-        $_SHARED{bail}->({
-            message => "This can't happen!  data_source_id = $data_source_id is a primary key!",
-        });
-    }
-    else {
-        $data_source = $driver_there->{rows}[0]{data_source};
-        $user_name = $driver_there->{rows}[0]{user_name};
-        $auth = $driver_there->{rows}[0]{auth};
-        $dbh_attr = $driver_there->{rows}[0]{dbh_attr};
-    }
-
-    my $attr = undef;
-    if (length($dbh_attr) > 0 ) {
-        $attr = Load($dbh_attr);
-    }
-
-    $dbh = DBI->connect(
-      $data_source,
-      $user_name,
-      $auth,
-      $attr,
-    );
-
-    if ($DBI::errstr) {
-        $_SHARED{bail}->({
-            header => "Could not connect to database",
-            message => (<<MESSAGE),
-    $data_source
-    user: $user_name
-    password: $auth
-    attributes:
-    $dbh_attr
-MESSAGE
-            error => $DBI::errstr,
-        });
-    }
-}
-
-#######################################################################
-#                                                                     #
-# We're only INSERTing into the shadow table, so to distinguish OLD.* #
-# from NEW.*, we do the following based on the prefix of the column   #
-# name.                                                               #
-#                                                                     #
-#######################################################################
-my ($old, $new);
-foreach my $key (keys %{ $_TD->{'new'} }) {
-    next unless $key =~ /^(old|new)_(.*)/;
-    if ($1 eq 'old') {
-        if (defined $_TD->{'new'}->{$_}) {
-            $old->{$2} = $dbh->quote($_TD->{'new'}->{$key});
-        }
-        else {
-            $old->{$2} = 'NULL';
-        }
-    }
-    else {
-        if (defined $_TD->{'new'}->{$_}) {
-            $new->{$2} = $dbh->quote($_TD->{'new'}->{$key});
-        }
-        else {
-            $new->{$2} = 'NULL';
-        }
-    }
-}
-
-my $iud = (
-    I => \&insert,
-    U => \&update,
-    D => \&delete,
-);
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+my $data_source_id = shift;
+elog ERROR, "In shadow_trigger_function, data_source_id must be an integer"
+    unless ($data_source_id =~ /^\d+$/);
+my $query = "SELECT cache_connection( $data_source_id )";
+elog NOTICE, "In shadow_trigger_function, calling\n    $query" if $_SHARED{debug};
+elog NOTICE, "In shadow_trigger_function, the trigger payload is\n". Dump(\$_TD) if $_SHARED{debug};
+my $rv = spi_exec_query($query);
 
 my $table = $_TD->{relname};
 
+########################################################################
+#                                                                      #
+# We are only INSERTing into the shadow table, so to distinguish OLD.* #
+# from NEW.*, we do the following based on the prefix of the column    #
+# name.                                                                #
+#                                                                      #
+########################################################################
+my ($old, $new, $key, $col);
+foreach $key (grep {/^.?old_/} keys %{ $_TD->{'new'} }) {
+    ($col = $key) =~ s/old_//;
+    if (defined $_TD->{new}{$key}) {
+        $old->{$col} = $_SHARED{dbh}{ $data_source_id }->quote($_TD->{'new'}{$key});
+    }
+    else {
+        $old->{$col} = 'NULL';
+    }
+}
+
+foreach my $key (grep {/^.?new_/} keys %{ $_TD->{'new'} }) {
+    ($col = $key) =~ s/new_//;
+    if (defined $_TD->{new}{$key}) {
+        $new->{$col} = $_SHARED{dbh}{ $data_source_id }->quote($_TD->{'new'}{$key});
+    }
+    else {
+        $new->{$col} = 'NULL';
+    }
+}
+
+elog NOTICE, "old is:\n". Dump(\$old)."\n\nnew is:\n". Dump(\$new);
+
+my $iud = {
+    I => \&insert,
+    U => \&update,
+    D => \&delete,
+};
+
+elog NOTICE, "In trigger on $table, action is $_TD->{'new'}{iud_action}" if $_SHARED{debug};
 if ($iud->{ $_TD->{'new'}{iud_action} }) {
+    $table =~ s/.*\.//;
+    $table =~ s/_shadow$//;
     $iud->{ $_TD->{'new'}{iud_action} }->();
 }
 else {
@@ -662,33 +853,45 @@ return 'SKIP';
 sub insert {
     my $sql = <<SQL;
 INSERT INTO $table (
-    @{[join("\n, ", sort keys %$new) ]}
-) VALUES (
-    @{[join(", ", map { '?' } sort keys %$new) ]}
+    @{[join(",\n    ", sort keys %$new) ]}
+)
+VALUES (
+    @{[join(
+        ",\n    ",
+        map {
+            $new->{$_}
+        }
+        sort keys %$new
+    ) ]}
 )
 SQL
-    my $sth = $dbh->prepare($sql);
-    $sth->execute($sql, map {$new->{$_}} sort keys %$new);
+    elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
+    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
+    $sth->execute();
+    $sth->finish();
 }
 
 sub update {
     my $sql = <<SQL;
 UPDATE $table
 SET
-    @{[ join("\n, ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
+    @{[ join(",\n    ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
 WHERE
     @{[
         join(
             "\nAND ",
             map {
-                my $connector = ($old->{$_} ne 'NULL')?'=':'IS';
-                "$_ $connector $old->{$_}"
+                ($old->{$_} eq 'NULL') ?
+                "$_ IS NULL"           :
+                "$_ = " . $old->{$_}
             } sort keys %$old
         )
     ]}
 SQL
-    my $sth = $dbh->prepare($sql);
-    $sth->execute($sql);
+    elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
+    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
+    $sth->execute();
+    $sth->finish();
 }
 
 sub delete {
@@ -699,85 +902,78 @@ WHERE
         join(
             "\nAND ",
             map {
-                my $connector = ($old->{$_} ne 'NULL')?'=':'IS';
-                "$_ $connector $old->{$_}"
+                ($old->{$_} eq 'NULL') ?
+                "$_ IS NULL"           :
+                "$_ = $old->{$_}"
             } sort keys %$old
         )
     ]}
 SQL
-    my $sth = $dbh->prepare($sql);
-    $sth->execute($sql);
+    elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
+    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
+    $sth->execute();
+    $sth->finish();
 }
 
 $$;
 
-CREATE OR REPLACE FUNCTION make_accessor_functions (
-    data_source TEXT,
+CREATE OR REPLACE FUNCTION set_up_connection (
+    data_source DATA_SOURCE,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes TEXT,
+    dbh_attributes YAML,
+    dbi_connection_environment YAML,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT
 )
-RETURNS BOOLEAN
+RETURNS INTEGER
 LANGUAGE plperlu
 AS $$
-use strict;
-use DBI;
-use YAML;
 
-my $dbh;
-my ($data_source, $user_name, $auth, $dbh_attributes, $remote_schema, $remote_catalog, $local_schema) = @_;
-my $data_source_id = check_connection({
-    data_source => $data_source,
-    user_name => $user_name,
-    auth => $auth,
-    dbh_attributes => $dbh_attributes,
-    remote_schema => $remote_schema,
-    remote_catalog => $remote_catalog,
-    local_schema => $local_schema
-});
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
 
-create_schema({
-    local_schema => $local_schema
-});
+my ($params, $quoted);
+foreach my $param (qw(data_source user_name auth dbh_attributes
+    dbi_connection_environment remote_schema remote_catalog
+    local_schema)) {
+    $params->{ $param } = shift;
+    if ( defined $params->{ $param } ) {
+        $quoted->{ $param } = $_SHARED{quote_literal}->(
+            $params->{ $param }
+        );
+    }
+    else {
+        $quoted->{ $param } = 'NULL';
+    }
+}
 
-create_accessor_methods({
-    local_schema => $local_schema,
-    remote_schema => $remote_schema,
-    remote_catalog => $remote_catalog,
-    data_source => $data_source,
-    user_name => $user_name,
-    auth => $auth,
-    data_source_id => $data_source_id,
-});
+my $driver = $_SHARED{quote_literal}->(
+    $params->{data_source}
+);
 
-return 'TRUE';
-
-sub check_connection {
-    my ($params) = @_;
-    my $driver = $params->{data_source};
-    my $sql = <<'SQL';
+my $sql = <<SQL;
 SELECT count(*) AS "driver_there"
 FROM dbi_link.available_drivers()
-WHERE available_drivers = $1
+WHERE available_drivers = $driver
 SQL
-    elog NOTICE, $sql if $_SHARED{debug};
-    my $sth = spi_prepare($sql, 'TEXT');
-    my $driver_there = spi_exec_prepared($sth, $driver);
-    if ($driver_there->{processed} == 0) {
-        elog ERROR, "Driver $driver is not available.  Can't look at database."
-    }
-    my $attr_href = Load($params->{dbh_attributes});
-    $dbh = DBI->connect(
-      $params->{data_source},
-      $params->{user_name},
-      $params->{auth},
-      $attr_href
-    );
-    if ($DBI::errstr) {
-        elog ERROR, <<ERR;
+
+elog NOTICE, $sql if $_SHARED{debug};
+my $driver_there = spi_exec_query($sql);
+if ($driver_there->{processed} == 0) {
+    elog ERROR, "Driver $driver is not available.  Can't look at database."
+}
+
+my $attr_href = Load($params->{dbh_attributes});
+my $dbh = DBI->connect(
+    $params->{data_source},
+    $params->{user_name},
+    $params->{auth},
+    $attr_href,
+);
+
+if ($DBI::errstr) {
+    elog ERROR, <<ERR;
 Could not connect to database
 data source: $params->{data_source}
 user: $params->{user_name}
@@ -787,131 +983,187 @@ $params->{dbh_attributes}
 
 $DBI::errstr
 ERR
+}
+
+my @methods = qw(table_info column_info quote);
+foreach my $method (@methods) {
+    elog NOTICE, "Checking whether $driver has $method..." if $_SHARED{debug};
+    if ($dbh->can($method)) {
+        elog NOTICE, "$driver has $method :)" if $_SHARED{debug};
     }
-    my @methods = qw(table_info column_info quote);
-    foreach my $method (@methods) {
-        elog NOTICE, "Checking whether $driver has $method..." if $_SHARED{debug};
-        if ($dbh->can($method)) {
-            elog NOTICE, "$driver has $method :)" if $_SHARED{debug};
-        }
-        else {
-            elog ERROR, (<<ERR);
+    else {
+        elog ERROR, (<<ERR);
 DBD driver $driver does not have the $method method, which is required
 for DBI-Link to work.  Exiting.
 ERR
-        }
     }
+}
 
-    my $sql = <<'SQL';
-INSERT INTO dbi_link.dbi_connection (
+my $sql = <<SQL;
+INSERT INTO dbi_link.dbi_all_connection_info (
     data_source,
     user_name,
     auth,
-    dbh_attr,
+    dbh_attributes,
+    dbi_connection_environment,
     remote_schema,
     remote_catalog,
     local_schema
 ) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7
+    $quoted->{data_source},
+    $quoted->{user_name},
+    $quoted->{auth},
+    $quoted->{dbh_attributes},
+    $quoted->{dbi_connection_environment},
+    $quoted->{remote_schema},
+    $quoted->{remote_catalog},
+    $quoted->{local_schema}
 )
 SQL
-    elog NOTICE, $sql if $_SHARED{debug};
-    my $sth = spi_prepare(
-        $sql,
-        'TEXT',
-        'TEXT',
-        'TEXT',
-        'TEXT',
-        'TEXT',
-        'TEXT',
-        'TEXT',
-    );
-    spi_exec_prepared(
-        $sth,
-        $params->{data_source},
-        $params->{user_name},
-        $params->{auth},
-        $params->{dbh_attributes},
-        $params->{remote_schema},
-        $params->{remote_catalog},
-        $params->{local_schema}
-    );
-            $sql = <<SQL;
+
+elog NOTICE, $sql if $_SHARED{debug};
+my $rv = spi_exec_query(
+    $sql
+);
+
+$sql = <<SQL;
 SELECT
-    currval(pg_get_serial_sequence(
-        'dbi_link.dbi_connection',
-        'data_source_id'
-    )) AS "the_val"
+    pg_catalog.currval(
+        pg_catalog.pg_get_serial_sequence(
+            'dbi_link.dbi_connection',
+            'data_source_id'
+        )
+    ) AS "the_val"
 SQL
-    my $result = spi_exec_query($sql);
-    if ($result->{processed} == 0) {
-        elog ERROR, "Couldn't retrieve the dbi connection id via currval()!";
-    }
-    elsif ($result->{processed} != 1) {
-        elog ERROR, "Got >$result->{processed}< results, not 1.  This can't happen!";
-    }
-    else {
-        return $result->{rows}[0]->{the_val};
-    }
+elog NOTICE, $sql if $_SHARED{debug};
+my $result = spi_exec_query($sql);
+if ($result->{processed} == 0) {
+    elog ERROR, "Couldn't retrieve the dbi connection id via currval()!";
 }
+else {
+    return $result->{rows}[0]{the_val};
+}
+$$;
 
-sub create_schema {
-    my ($params) = @_;
-    elog ERROR, "Must have a local_schema!" unless $params->{'local_schema'} =~ /\S/;
-    my $sql_check_for_schema = <<SQL;
-SELECT COUNT(*) AS "the_count"
+CREATE OR REPLACE FUNCTION dbi_link.create_schema (local_schema TEXT)
+RETURNS VOID
+LANGUAGE plperlU
+AS $$
+
+my $local_schema = shift;
+
+elog ERROR, "Must have a local_schema!" unless $local_schema =~ /\S/;
+my $literal_local_schema = $_SHARED{quote_literal}->(
+    $local_schema
+);
+my $identifier_local_schema = $_SHARED{quote_ident}->(
+    $local_schema
+);
+
+my $sql_check_for_schema = <<SQL;
+SELECT 1
 FROM pg_namespace
-WHERE nspname = '$params->{local_schema}'
+WHERE nspname = $literal_local_schema
 SQL
-    elog NOTICE, "Attempting\n$sql_check_for_schema\n" if $_SHARED{debug};
-    my $schema_there = spi_exec_query($sql_check_for_schema);
-    if ($schema_there->{rows}[0]->{'the_count'} != 0) {
-        elog ERROR, "Schema $params->{'local_schema'} already exists.";
+
+elog NOTICE, "In create_schema, attempting\n$sql_check_for_schema\n" if $_SHARED{debug};
+
+my $result = spi_exec_query($sql_check_for_schema);
+
+if ($result->{processed} != 0) {
+    elog ERROR, "Schema $local_schema already exists.";
+}
+else {
+    my $sql_create_schema = "CREATE SCHEMA $identifier_local_schema";
+    my $rv = spi_exec_query($sql_create_schema);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created schema $local_schema." if $_SHARED{debug}
     }
     else {
-        my $sql_create_schema = "CREATE SCHEMA $params->{'local_schema'}";
-        my $rv = spi_exec_query($sql_create_schema);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created schema $params->{'local_schema'}." if $_SHARED{debug}
-        }
-        else {
-            elog ERROR, "Could not create schema $params->{'local_schema'}.  Status was\n$rv->{status}";
-        }
+        elog ERROR, "Could not create schema $local_schema.  Status was\n$rv->{status}";
     }
 }
+return;
+$$;
 
-sub create_accessor_methods {
-    my ($params) = @_;
-    my $types = "'TABLE','VIEW'";
-    my $sth = $dbh->table_info(
-        $params->{remote_catalog},
-        $params->{remote_schema},
-        '%',
-        $types
-    );
-    my $quote = '$'x 2;
-    my $set_search = <<SQL;
+CREATE OR REPLACE FUNCTION dbi_link.create_accessor_methods (
+    local_schema TEXT,
+    remote_schema TEXT,
+    remote_catalog TEXT,
+    data_source DATA_SOURCE,
+    user_name TEXT,
+    auth TEXT,
+    data_source_id INTEGER
+)
+RETURNS VOID
+LANGUAGE plperlU
+AS $$
+
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+
+my $params;
+
+foreach my $param (qw(local_schema remote_schema remote_catalog
+        data_source user_name auth data_source_id)) {
+    $params->{$param} = shift;
+}
+
+my $quote = '$'x 2;
+my $identifier_local_schema = $_SHARED{quote_ident}->(
+    $params->{local_schema}
+);
+my $set_search = <<SQL;
 UPDATE
     pg_catalog.pg_settings
 SET
-    setting = '$local_schema,' || setting
+    setting = CASE
+        WHEN
+            '$identifier_local_schema' = ANY(string_to_array(setting, ','))
+        THEN
+            setting
+        ELSE
+            '$identifier_local_schema,' || setting
+        END
 WHERE name = 'search_path'
 SQL
-    elog NOTICE, $set_search if $_SHARED{debug};
-    my $rv = spi_exec_query($set_search);
-    while(my $table = $sth->fetchrow_hashref('NAME_lc')) {
-        my $base_name = $table->{table_name};
-        my $type_name = join('_',$base_name,'rowtype');
-        my @cols;
-        my @types;
-        my %comments = ();
-        my $sth2 = $dbh->column_info(undef, $params->{remote_schema}, $table->{table_name}, '%');
+
+elog NOTICE, $set_search if $_SHARED{debug};
+my $rv = spi_exec_query($set_search);
+my $types = "'TABLE','VIEW'";
+
+
+spi_exec_query("SELECT cache_connection( $params->{data_source_id} )");
+
+my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
+    $params->{remote_catalog},
+    $params->{remote_schema},
+    '%',
+    $types
+);
+
+while(my $table = $sth->fetchrow_hashref) {
+    my $base_name = $_SHARED{quote_ident}->(
+        $table->{TABLE_NAME}
+    );
+    my $type_name = join(
+        '.',
+        map { $_SHARED{quote_ident}->($_) }
+        $identifier_local_schema,
+        join(
+            '_',
+            $table->{TABLE_NAME},
+            'rowtype'
+        )
+    );
+    my (@raw_cols, @cols, @types);
+    my %comments = ();
+    elog NOTICE, "Getting column info for >$table->{TABLE_NAME}<" if $_SHARED{debug};
+    my $sth2 = $_SHARED{dbh}{ $params->{data_source_id} }->column_info(
+        undef,
+        $params->{remote_schema},
+        $table->{TABLE_NAME},
+        '%'
+    );
 ######################################################################
 #                                                                    #
 # This part should probably refer to a whole mapping between foreign #
@@ -919,72 +1171,59 @@ SQL
 # integer-looking things into INTEGERs, everything else into TEXT.   #
 #                                                                    #
 ######################################################################
-        while(my $column = $sth2->fetchrow_hashref('NAME_lc')) {
-            push @cols, $column->{column_name};
-            $comments{ $column->{column_name} } =
-                $column->{type_name}
-            ;
-            if ( $column->{type_name} =~ /integer/i ) {
-                push @types, 'INTEGER';
-            }
-            else {
-                push @types, 'TEXT';
-            }
-        }
-        $sth2->finish;
-        my $sql = <<SQL;
-CREATE TYPE $type_name AS (
-    @{[
-        join(
-            ",\n    ",
-            map {
-                "$cols[$_] $types[$_]"
-            } (0..$#cols)
-        )
-    ]}
-)
-SQL
-        elog NOTICE, "Trying to create type\n$sql\n" if $_SHARED{debug};
-        $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created type $type_name." if $_SHARED{debug};
+    while(my $column = $sth2->fetchrow_hashref) {
+        push @raw_cols, $column->{COLUMN_NAME};
+        my $cn = $_SHARED{quote_ident}->(
+            $column->{COLUMN_NAME}
+        );
+        push @cols, $cn;
+        $comments{ $cn } = $column->{TYPE_NAME};
+        elog NOTICE, "Adding column $cn to table $table->{TABLE_NAME}"
+            if $_SHARED{debug};
+        if ( $column->{TYPE_NAME} =~ /integer/i ) {
+            push @types, 'INTEGER';
         }
         else {
-            elog ERROR, "Could not create type $type_name.  $rv->{status}";
+            push @types, 'TEXT';
         }
-        foreach my $comment (keys %comments) {
-            $sql = <<SQL;
-COMMENT ON COLUMN $type_name.$comment IS $quote
-$comments{$comment}
-$quote
-SQL
-            elog NOTICE, $sql if $_SHARED{debug};
-            $rv = spi_exec_query($sql);
-            if ($rv->{status} eq 'SPI_OK_UTILITY') {
-                elog NOTICE, "Created comment on $type_name.$comment" if $_SHARED{debug};
-            }
-            else {
-                elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
-            }
-        }
-        $sql = <<SQL;
-CREATE VIEW $base_name AS
+    }
+    $sth2->finish;
+
+    my $sql = <<SQL;
+CREATE VIEW $identifier_local_schema.$base_name AS
 SELECT * FROM dbi_link.remote_select(
     $params->{data_source_id},
-    'SELECT * FROM $base_name'
+    'SELECT * FROM $table->{TABLE_NAME}'
 )
 AS (
     @{[join(",\n    ", map {"$cols[$_] $types[$_]"} (0..$#cols)) ]}
 )
 SQL
-        elog NOTICE, $sql;
-        my $rv = spi_exec_query($sql);
+    elog NOTICE, $sql;
+    my $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created view $base_name."
+    }
+    else {
+        elog ERROR, "Could not create view $base_name.  $rv->{status}";
+    }
+
+    foreach my $comment (keys %comments) {
+        $sql = <<SQL;
+COMMENT ON COLUMN $identifier_local_schema.$base_name.$comment IS $quote
+$comments{$comment}
+$quote
+SQL
+        elog NOTICE, $sql if $_SHARED{debug};
+        $rv = spi_exec_query($sql);
         if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created view $base_name."
+            elog NOTICE, "Created comment on $type_name.$comment" if $_SHARED{debug};
         }
         else {
-            elog ERROR, "Could not create view $base_name.  $rv->{status}";
+            elog ERROR, "Could not create comment on $type_name.$comment  $rv->{status}";
         }
+    }
+
 #########################################################################
 #                                                                       #
 # This section does INSERTs, UPDATEs and DELETEs by INSERTing into a    #
@@ -992,77 +1231,302 @@ SQL
 # table that Does The Right Thing(TM).                                  #
 #                                                                       #
 #########################################################################
-        my $shadow_table = join('_', $base_name, 'shadow');
-        $sql = <<SQL;
-CREATE TABLE $shadow_table (
-    iud_action CHAR(1),
-    @{[ join(",\n    ", map {"old_$cols[$_] $types[$_]"} (0..$#cols) ) ]},
-    @{[ join(",\n    ", map {"new_$cols[$_] $types[$_]"} (0..$#cols) ) ]}
-)
-SQL
-        elog NOTICE, "Trying to create shadow table $shadow_table\n$sql\n" if $_SHARED{debug};
-        $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created shadow table $shadow_table." if $_SHARED{debug};
-        }
-        else {
-            elog ERROR, "Could not create shadow table $shadow_table.  $rv->{status}";
-        }
-        $sql = <<SQL;
-CREATE TRIGGER ${shadow_table}_trg
-    BEFORE INSERT ON $shadow_table
-    FOR EACH ROW
-    EXECUTE PROCEDURE dbi_link.shadow_trigger_func($data_source_id)
-SQL
-        elog NOTICE, "Trying to create trigger on shadow table\n$sql\n" if $_SHARED{debug};
-        $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created trigger on shadow table $shadow_table." if $_SHARED{debug};
-        }
-        else {
-            elog ERROR, "Could not create trigger on shadow table $shadow_table.  $rv->{status}";
-        }
-        my $nulls = join(", ", map {'NULL'} 1..scalar(@cols));
-        $sql = <<SQL;
-CREATE RULE ${base_name}_insert AS
-ON INSERT TO $base_name DO INSTEAD
-INSERT INTO $shadow_table VALUES ('I', $nulls, NEW.*)
-SQL
-        my $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created INSERT rule on VIEW $base_name."
-        }
-        else {
-            elog ERROR, "Could not create INSERT rule on VIEW $base_name.  $rv->{status}";
-        }
-        $sql = <<SQL;
-CREATE RULE ${base_name}_update AS
-ON UPDATE TO $base_name DO INSTEAD
-INSERT INTO ${base_name}_shadow VALUES ('U', OLD.*, NEW.*)
-SQL
-        my $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created UPDATE rule on VIEW $base_name."
-        }
-        else {
-            elog ERROR, "Could not create UPDATE rule on VIEW $base_name.  $rv->{status}";
-        }
-        $sql = <<SQL;
-CREATE RULE ${base_name}_delete AS
-ON DELETE TO $base_name DO INSTEAD
-INSERT INTO ${base_name}_shadow VALUES ('D', OLD.*, $nulls)
-SQL
-        my $rv = spi_exec_query($sql);
-        if ($rv->{status} eq 'SPI_OK_UTILITY') {
-            elog NOTICE, "Created DELETE rule on VIEW $base_name."
-        }
-        else {
-            elog ERROR, "Could not create DELETE rule on VIEW $base_name.  $rv->{status}";
+    my $shadow_table = $_SHARED{quote_ident}->(
+        join('_', $table->{TABLE_NAME}, 'shadow')
+    );
+    my $shadow_columns;
+    foreach my $age (qw(old new)) {
+        my $at = join('_', $age, 'type');
+        foreach my $i (0..$#raw_cols) {
+            my $sc_name = $_SHARED{quote_ident}->(
+                join('_', $age, $raw_cols[$i])
+            );
+            push @{ $shadow_columns->{ $age } },
+                $sc_name;
+            push @{ $shadow_columns->{ $at } },
+                $sc_name . " $types[$i]";
         }
     }
-    $sth->finish;
-}
 
+    $sql = <<SQL;
+CREATE TABLE $identifier_local_schema.$shadow_table (
+    @{[
+        join(
+            ",\n    ",
+            'iud_action CHAR(1)',
+            @{ $shadow_columns->{old_type} },
+            @{ $shadow_columns->{new_type} },
+        )
+    ]}
+)
+SQL
+    elog NOTICE, "Trying to create shadow table $shadow_table\n$sql\n" if $_SHARED{debug};
+    $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created shadow table $shadow_table." if $_SHARED{debug};
+    }
+    else {
+        elog ERROR, "Could not create shadow table $shadow_table.  $rv->{status}";
+    }
+    my $shadow_trigger_name = $_SHARED{quote_ident}->(
+        join('_', $table->{TABLE_NAME}, 'shadow','trg')
+    );
+
+        $sql = <<SQL;
+CREATE TRIGGER $shadow_trigger_name
+    BEFORE INSERT ON $shadow_table
+    FOR EACH ROW
+    EXECUTE PROCEDURE dbi_link.shadow_trigger_func($params->{data_source_id})
+SQL
+    elog NOTICE, "Trying to create trigger on shadow table\n$sql\n" if $_SHARED{debug};
+    $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created trigger on shadow table $shadow_table." if $_SHARED{debug};
+    }
+    else {
+        elog ERROR, "Could not create trigger on shadow table $shadow_table.  $rv->{status}";
+    }
+    my $insert_rule_name = $_SHARED{quote_ident}->(
+        join('_', $table->{TABLE_NAME}, 'insert')
+    );
+
+    $sql = <<SQL;
+CREATE RULE $insert_rule_name AS
+ON INSERT TO $identifier_local_schema.$base_name DO INSTEAD
+INSERT INTO $identifier_local_schema.$shadow_table (
+    @{[
+        join(
+            "\n,    ",
+            'iud_action',
+            @{ $shadow_columns->{new} }
+        )
+    ]}
+)
+VALUES (
+    'I',
+    NEW.@{[join(",\n    NEW.", @cols)]}
+)
+SQL
+    my $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created INSERT rule on VIEW $base_name."
+    }
+    else {
+        elog ERROR, "Could not create INSERT rule on VIEW $base_name.  $rv->{status}";
+    }
+    my $update_rule_name = $_SHARED{quote_ident}->(
+        join('_', $table->{TABLE_NAME}, 'update')
+    );
+
+    $sql = <<SQL;
+CREATE RULE $update_rule_name AS
+ON UPDATE TO $identifier_local_schema.$base_name DO INSTEAD
+INSERT INTO $identifier_local_schema.$shadow_table (
+    @{[
+        join(
+            "\n,    ",
+            'iud_action',
+            @{ $shadow_columns->{old} },
+            @{ $shadow_columns->{new} },
+        )
+    ]}
+)
+VALUES (
+    'U',
+    OLD.@{[join(",\n    OLD.", @cols)]},
+    NEW.@{[join(",\n    NEW.", @cols)]}
+)
+SQL
+    my $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created UPDATE rule on VIEW $base_name."
+    }
+    else {
+        elog ERROR, "Could not create UPDATE rule on VIEW $base_name.  $rv->{status}";
+    }
+    my $delete_rule_name = $_SHARED{quote_ident}->(
+        join('_', $table->{TABLE_NAME}, 'delete')
+    );
+
+    $sql = <<SQL;
+CREATE RULE $delete_rule_name AS
+ON DELETE TO $identifier_local_schema.$base_name DO INSTEAD
+INSERT INTO $identifier_local_schema.$shadow_table (
+    @{[
+        join(
+            "\n,    ",
+            'iud_action',
+            @{ $shadow_columns->{old} },
+        )
+    ]}
+)
+VALUES (
+    'D',
+    OLD.@{[join(",\n    OLD.", @cols)]}
+)
+SQL
+    my $rv = spi_exec_query($sql);
+    if ($rv->{status} eq 'SPI_OK_UTILITY') {
+        elog NOTICE, "Created DELETE rule on VIEW $base_name."
+    }
+    else {
+        elog ERROR, "Could not create DELETE rule on VIEW $base_name.  $rv->{status}";
+    }
+}
+$sth->finish;
+
+return;
 $$;
 
--- SET search_path TO DEFAULT;
+CREATE OR REPLACE FUNCTION dbi_link.make_accessor_functions (
+    data_source DATA_SOURCE,
+    user_name TEXT,
+    auth TEXT,
+    dbh_attributes YAML,
+    dbi_connection_environment YAML,
+    remote_schema TEXT,
+    remote_catalog TEXT,
+    local_schema TEXT
+)
+RETURNS VOID
+LANGUAGE plperlu
+AS $$
+
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+
+my (
+    $data_source,
+    $user_name,
+    $auth,
+    $dbh_attributes,
+    $dbi_connection_environment,
+    $remote_schema,
+    $remote_catalog,
+    $local_schema,
+) = map {
+    defined $_                    ?
+    $_SHARED{quote_literal}->($_) :
+    'NULL'
+} @_;
+
+my $sql = <<SQL;
+SELECT dbi_link.set_up_connection(
+    $data_source,
+    $user_name,
+    $auth,
+    $dbh_attributes,
+    $dbi_connection_environment,
+    $remote_schema,
+    $remote_catalog,
+    $local_schema
+)
+SQL
+
+elog NOTICE, $sql if $_SHARED{debug};
+
+my $data_source_id = spi_exec_query($sql)->{rows}[0]{set_up_connection};
+
+spi_exec_query("SELECT dbi_link.create_schema($local_schema)");
+
+$sql = <<SQL;
+SELECT dbi_link.create_accessor_methods(
+    $local_schema,
+    $remote_schema,
+    $remote_catalog,
+    $data_source,
+    $user_name,
+    $auth,
+    $data_source_id
+)
+SQL
+
+elog NOTICE, $sql if $_SHARED{debug};
+
+spi_exec_query($sql);
+
+return;
+$$;
+
+CREATE OR REPLACE FUNCTION dbi_link.refresh_schema(
+    data_source_id INTEGER
+)
+RETURNS VOID
+LANGUAGE plperlU
+AS $$
+
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+
+my $data_source_id = shift;
+my $connection_info = $_SHARED{get_connection_info}->({
+    data_source_id => $data_source_id,
+});
+
+elog NOTICE, "connection info is\n".Dump($connection_info)
+    if $_SHARED{debug};
+
+my $literal =  $_SHARED{quote_literal}->(
+    $connection_info->{local_schema}
+);
+
+my $sql_check_for_schema = <<SQL;
+SELECT 1
+FROM pg_namespace
+WHERE nspname = $literal
+SQL
+
+elog NOTICE, "Attempting\n$sql_check_for_schema\n" if $_SHARED{debug};
+
+my $result = spi_exec_query($sql_check_for_schema);
+
+my $identifier = $_SHARED{quote_ident}->(
+    $connection_info->{local_schema}
+);
+
+if ($result->{processed} == 1) {
+    elog NOTICE, "Found schema $identifier"
+        if $_SHARED{debug};
+    my $search_path = join(
+        ',',
+        grep { !/$identifier/ }
+            split (/,/, spi_exec_query(
+                    'SHOW search_path'
+                )->{rows}[0]{search_path}
+            )
+        );
+    spi_exec_query("UPDATE pg_catalog.pg_settings SET setting = '$search_path' WHERE name = 'search_path'");
+
+    spi_exec_query("DROP SCHEMA $identifier CASCADE");
+}
+
+spi_exec_query("SELECT dbi_link.create_schema($literal)");
+
+my $quoted;
+foreach my $key (keys %$connection_info) {
+    if (defined $connection_info->{$key}) {
+        $quoted->{$key} = $_SHARED{quote_literal}->(
+            $connection_info->{$key}
+        );
+    }
+    else {
+        $quoted->{$key} = 'NULL';
+    }
+}
+
+my $sql = <<SQL;
+SELECT dbi_link.create_accessor_methods(
+    $quoted->{local_schema},
+    $quoted->{remote_schema},
+    $quoted->{remote_catalog},
+    $quoted->{data_source},
+    $quoted->{user_name},
+    $quoted->{auth},
+    $data_source_id
+)
+SQL
+
+elog NOTICE, $sql if $_SHARED{debug};
+
+spi_exec_query($sql);
+
+return;
+$$;
