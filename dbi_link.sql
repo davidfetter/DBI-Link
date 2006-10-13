@@ -348,7 +348,7 @@ $_SHARED{min_pg_version} = spi_exec_query('SELECT min_pg_version FROM dbi_link.m
     ->{rows}
     ->[0]
     ->{min_pg_version };
-$_SHARED{server_version} = spi_exec_query('SELECT version_integer()')
+$_SHARED{server_version} = spi_exec_query('SELECT dbi_link.version_integer()')
     ->{rows}
     ->[0]
     ->{version_integer};
@@ -667,7 +667,7 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 # This is safe because we already know it is an integer. #
 #                                                        #
 ##########################################################
-my $query = "SELECT cache_connection( $_[0] )";
+my $query = "SELECT dbi_link.cache_connection( $_[0] )";
 elog NOTICE, $query if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 

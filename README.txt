@@ -26,7 +26,7 @@ available.
 
     psql -f dbi_link.sql outreach
 
-Add Foreign Database Connection
+Add Remote Database Connection
 
 Do the following, with the appropriate parameters.  "Appropriate parameters"
 come from the perldoc of the appropriate DBD, in this case, DBD::mysql, except
@@ -35,12 +35,9 @@ for "local schema," which you must supply.  "local schema" must not yet exist.
 /* 
  * Data source:     dbi:mysql:database=world;host=localhost
  * User:            root
- * Password:        NULL
- * dbh attributes:  {
- *                      AutoCommit => 1,
- *                      RaiseError => 1,
- *                      FetchHashKeyName => "NAME_lc"
- *                  }
+ * Password:        foobar
+ * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
+ * dbh environment: NULL
  * remote schema:   NULL
  * remote catalog:  NULL
  * local schema:    world
@@ -50,7 +47,7 @@ UPDATE
     pg_catalog.pg_settings
 SET
     setting =
-        CASE WHEN setting ~ 'dbi_link'
+        CASE WHEN 'dbi_link' = ANY(string_to_array(setting, ','))
         THEN setting
         ELSE 'dbi_link,' || setting
         END
@@ -59,22 +56,38 @@ WHERE
 ;
 
 SELECT make_accessor_functions(
-    'dbi:mysql:database=world;host=localhost',
+    'dbi:mysql:database=sakila;host=localhost',
     'root',
     'foobar',
     '---
 AutoCommit: 1
 RaiseError: 1
-FetchHashKeyName: NAME_lc
-',                           -- This is YAML.
+',
     NULL,
     NULL,
-    'world'
+    NULL,
+    'sakila'
 );
 
-USING THE FOREIGN DB CONNECTION
 
-UPDATE world.country
-SET code2 = lower(code2)
-WHERE id < 10;
+USING THE REMOTE DB CONNECTION
+
+SELECT
+    initcap(title)
+FROM
+    sakila.film;
+
+REFRESHING THE REMOTE DB SCHEMA
+
+Any time the DDL of the remote database changes, drop its local schema and
+call dbi_link.refresh_schema.  Here's an example:
+
+DROP SCHEMA sakila CASCADE;
+
+SELECT
+    dbi_link.refresh_schema(data_source_id)
+FROM
+    dbi_link.dbi_connection
+WHERE
+    local_schema = 'sakila';
 
