@@ -3,7 +3,7 @@
  * User:            hr
  * Password:        foobar
  * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
- * dbh environment: See below
+ * dbh environment: NULL
  * remote schema:   NULL
  * remote catalog:  NULL
  * local schema:    hr
@@ -29,30 +29,7 @@ SELECT make_accessor_functions(
 AutoCommit: 1
 RaiseError: 1
 ',
-    $$---
-env_action: overwrite
-env_name: NLS_LANG
-env_value: AMERICAN_AMERICA.AL32UTF8
----
-env_action: overwrite
-env_name: ORACLE_HOME
-env_value: /usr/lib/oracle/xe/app/oracle/product/10.2.0/client
----
-env_action: overwrite
-env_name: SQLPATH
-env_value:
-/usr/lib/oracle/xe/app/oracle/product/10.2.0/client/sqlplus
----
-env_action: prepend
-env_name: PATH
-env_value:
-'/usr/lib/oracle/xe/app/oracle/product/10.2.0/client/bin:'
----
-env_action: overwrite
-env_name: LD_LIBRARY_PATH
-env_value:
-'/usr/lib/oracle/xe/app/oracle/product/10.2.0/client/lib:'
-    $$,
+    NULL,
     NULL,
     NULL,
     'hr'
