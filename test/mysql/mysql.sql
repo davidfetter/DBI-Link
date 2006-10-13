@@ -1,8 +1,9 @@
 /* 
  * Data source:     dbi:mysql:database=world;host=localhost
  * User:            root
- * Password:        NULL
- * dbh attributes:  {AutoCommit => 1, RaiseError => 1, FetchHashKeyName => "NAME_lc"}
+ * Password:        foobar
+ * dbh attributes:  {AutoCommit => 1, RaiseError => 1}
+ * dbh environment: NULL
  * remote schema:   NULL
  * remote catalog:  NULL
  * local schema:    world
