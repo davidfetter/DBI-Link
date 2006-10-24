@@ -1,6 +1,38 @@
-This file represents items to be addressed.
+TODO:
 
-1.  Investigate putting $dbh handles in %_SHARED for quicker write operations.
+1.  Transaction semantics on foreign data source?  Sketch:
+    * Provide the following functions callable from SQL:
+
+      - do_begin(data_source_id INTEGER)
+          This should fail and raise an error if the remote data
+          store has no way to do a rollback.
+
+      - do_commit(data_source_id INTEGER)
+
+      - do_rollback(data_source_id INTEGER)
+
+    * For transaction-capable remote databases, when no do_begin() has
+      been called, do:
+
+      - Per-row triggers which, instead of executing SQL immediately
+        as they do now, pile it into a temporary store, maybe a perl
+        array which spills to a temp table when it gets too big, for
+        some value of "too big."
+
+      - Per-statement triggers which fire after the per-row trigger
+        and walk the temporary store from the per-row triggers.
+
+    * For transaction-capable remote databases, when do_begin() *has*
+      been called, do:
+
+      - Per-row triggers as above, only they try to execute at each
+        row.  They raise an ERROR if they fail
+
+      - Per-statement triggers which become a no-op because you need
+        to
+
+      - Call do_commit() or do_rollback() manually at the end of the
+        remote transaction.
 
 2.  Some kind of better documentation system, possibly docbook.  This should
 be able to generate HTML, PDF, POD(?) and others as needed.
@@ -15,6 +47,7 @@ different versions of foreign data sources?
 * Firebird
 * Informix
 * Microsoft SQL Server
+* Mimer
 * MySQL
 * Oracle
 * Sybase
