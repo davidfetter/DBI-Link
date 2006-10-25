@@ -85,25 +85,21 @@ if ($@) {
 return 1;
 $$;
 
-COMMENT ON FUNCTION dbi_link.is_yaml(TEXT) IS $$
-Pretty self-explanatory ;)
-$$;
+COMMENT ON FUNCTION dbi_link.is_yaml(TEXT) IS $$Pretty self-explanatory ;)$$;
 
 CREATE DOMAIN yaml AS TEXT
     CHECK (
         dbi_link.is_yaml(VALUE)
     );
 
-COMMENT ON DOMAIN dbi_link.yaml IS $$
-Pretty self-explanatory ;)
-$$;
+COMMENT ON DOMAIN dbi_link.yaml IS $$Pretty self-explanatory ;)$$;
 
 CREATE OR REPLACE FUNCTION dbi_link.is_data_source(TEXT)
 RETURNS boolean
 STRICT
 LANGUAGE plperlu
 AS $$
-use DBI;
+use DBI 1.43;
 my @args = DBI->parse_dsn($_[0]);
 if (defined @args) {
     return 1;
@@ -174,7 +170,9 @@ return unless (defined  $settings_yaml);
 
 my $settings = Load($settings_yaml);
 elog NOTICE, Dump($settings) if $_SHARED{debug};
-elog ERROR, "In dbi_link.add_dbi_connection_environment, settings is a >@{[ref($settings)]}<, not an array reference"
+elog ERROR, "In dbi_link.add_dbi_connection_environment, settings is a >@{[
+    ref($settings)
+]}<, not an array reference"
     unless (ref($settings) eq 'ARRAY');
 my $count = 0;
 foreach my $setting (@$settings) {
@@ -360,9 +358,10 @@ my $shared = populate_hashref();
 
 foreach my $sub (keys %$shared) {
     my $ref = ref($_SHARED{$sub});
-    elog NOTICE, $ref if $_SHARED{debug};
+    # elog NOTICE, $ref if $_SHARED{debug};
     if ($ref eq 'CODE') {
-        elog NOTICE, "$sub already set." if $_SHARED{debug};
+        # Do nothing.
+        # elog NOTICE, "$sub already set." if $_SHARED{debug};
     }
     else {
         elog NOTICE, "Setting $sub in \%_SHARED hash." if $_SHARED{debug};
@@ -387,7 +386,7 @@ get_connection_info => sub {
     elog NOTICE, "Entering get_connection_info" if $_SHARED{debug};
     elog NOTICE, 'ref($args) is '.ref($args)."\n".Dump($args) if $_SHARED{debug};
     unless (defined $args->{data_source_id}) {
-        elog ERROR, "In get_connection_info, must provide a data_source_id"
+        elog ERROR, "In get_connection_info, must provide a data_source_id";
     }
     unless ($args->{data_source_id} =~ /^\d+$/) {
         elog ERROR, "In get_connection_info, must provide an integer data_source_id";
@@ -758,7 +757,7 @@ LANGUAGE plperlu AS $$
 #################################
 spi_exec_query('SELECT dbi_link.dbi_link_init()');
 
-spi_exec_query("SELECT cache_connection($_[0])");
+spi_exec_query("SELECT dbi_link.cache_connection($_[0])");
 
 $_SHARED{remote_exec_dbh}->({
     dbh => $_SHARED{dbh}{ $_[0] },
@@ -795,124 +794,156 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 my $data_source_id = shift;
 elog ERROR, "In shadow_trigger_function, data_source_id must be an integer"
     unless ($data_source_id =~ /^\d+$/);
-my $query = "SELECT cache_connection( $data_source_id )";
+my $query = "SELECT dbi_link.cache_connection( $data_source_id )";
 elog NOTICE, "In shadow_trigger_function, calling\n    $query" if $_SHARED{debug};
 elog NOTICE, "In shadow_trigger_function, the trigger payload is\n". Dump(\$_TD) if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 
 my $table = $_TD->{relname};
-
-########################################################################
-#                                                                      #
-# We are only INSERTing into the shadow table, so to distinguish OLD.* #
-# from NEW.*, we do the following based on the prefix of the column    #
-# name.                                                                #
-#                                                                      #
-########################################################################
-my ($old, $new, $key, $col);
-foreach $key (grep {/^.?old_/} keys %{ $_TD->{'new'} }) {
-    ($col = $key) =~ s/old_//;
-    if (defined $_TD->{new}{$key}) {
-        $old->{$col} = $_SHARED{dbh}{ $data_source_id }->quote($_TD->{'new'}{$key});
-    }
-    else {
-        $old->{$col} = 'NULL';
-    }
+elog NOTICE, "Raw table name is $table";
+elog NOTICE, "In trigger on $table, action is $_TD->{new}{iud_action}" if $_SHARED{debug};
+$table =~ s{
+    \A                  # Beginning of string.
+    (.*)                # Actual table name.
+    _shadow             # Strip off shadow.
+    \z                  # End of string.
 }
-
-foreach my $key (grep {/^.?new_/} keys %{ $_TD->{'new'} }) {
-    ($col = $key) =~ s/new_//;
-    if (defined $_TD->{new}{$key}) {
-        $new->{$col} = $_SHARED{dbh}{ $data_source_id }->quote($_TD->{'new'}{$key});
-    }
-    else {
-        $new->{$col} = 'NULL';
-    }
-}
-
-elog NOTICE, "old is:\n". Dump(\$old)."\n\nnew is:\n". Dump(\$new);
+{$1}sx;
+elog NOTICE, "Cooked table name is $table";
 
 my $iud = {
-    I => \&insert,
-    U => \&update,
-    D => \&delete,
+    I => \&do_insert,
+    U => \&do_update,
+    D => \&do_delete,
 };
 
-elog NOTICE, "In trigger on $table, action is $_TD->{'new'}{iud_action}" if $_SHARED{debug};
-if ($iud->{ $_TD->{'new'}{iud_action} }) {
-    $table =~ s/.*\.//;
-    $table =~ s/_shadow$//;
-    $iud->{ $_TD->{'new'}{iud_action} }->();
+if ($iud->{ $_TD->{new}{iud_action} }) {
+    $iud->{ $_TD->{new}{iud_action} }->({
+        payload => $_TD->{new}
+    });
 }
 else {
-    elog ERROR, "Trigger event was $_TD->{'new'}{iud_action}<, but should have been one of I, U or D!"
+    elog ERROR, "Trigger event was $_TD->{new}{iud_action}<, but should have been one of I, U or D!"
 }
 
 return 'SKIP';
 
-sub insert {
+sub do_insert {
+    my ($params) = @_;
+    elog ERROR, "In do_insert, must pass a payload!"
+        unless (defined $params->{payload});
+    elog ERROR, "In do_insert, payload must be a hash reference!"
+        unless (ref $params->{payload} eq 'HASH');
+    my (@keys, @values);
+    foreach my $key (sort keys %{ $params->{payload} } ) {
+        next unless $key =~ /^.?new_(.*)/;
+        my $real_key = $1;
+        push @keys, $real_key;
+        push @values, $_SHARED{dbh}{ $data_source_id }->quote(
+            $params->{payload}{$key}
+        );
+    }
     my $sql = <<SQL;
 INSERT INTO $table (
-    @{[join(",\n    ", sort keys %$new) ]}
+    @{[
+        join(
+            ",\n    ",
+            @keys
+        )
+    ]}
 )
 VALUES (
-    @{[join(
-        ",\n    ",
-        map {
-            $new->{$_}
-        }
-        sort keys %$new
-    ) ]}
+    @{[
+        join(
+            ",\n    ",
+            @values
+        )
+    ]}
 )
 SQL
     elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
-    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
-    $sth->execute();
-    $sth->finish();
+    $_SHARED{dbh}{ $data_source_id }->do($sql);
 }
 
-sub update {
+sub do_update {
+    my ($params) = @_;
+    elog ERROR, "In do_update, must pass a payload!"
+        unless (defined $params->{payload});
+    elog ERROR, "In do_update, payload must be a hash reference!"
+        unless (ref $params->{payload} eq 'HASH');
     my $sql = <<SQL;
 UPDATE $table
 SET
-    @{[ join(",\n    ", map { "$_ = $new->{$_}" } sort keys %$new) ]}
+    @{[ make_pairs({
+        payload => $params->{payload},
+        which => 'new',
+        joiner => ",\n    ",
+    }) ]}
 WHERE
-    @{[
-        join(
-            "\nAND ",
-            map {
-                ($old->{$_} eq 'NULL') ?
-                "$_ IS NULL"           :
-                "$_ = " . $old->{$_}
-            } sort keys %$old
-        )
-    ]}
+    @{[ make_pairs({
+        payload => $params->{payload},
+        which => 'old',
+        joiner => "\nAND ",
+        transform_null => 'true'
+    }) ]}
 SQL
     elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
-    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
-    $sth->execute();
-    $sth->finish();
+    $_SHARED{dbh}{ $data_source_id }->do($sql);
 }
 
-sub delete {
+sub do_delete {
+    my ($params) = @_;
+    elog ERROR, "In do_delete, must pass a payload!"
+        unless (defined $params->{payload});
+    elog ERROR, "In do_delete, payload must be a hash reference!"
+        unless (ref $params->{payload} eq 'HASH');
     my $sql = <<SQL;
 DELETE FROM $table
 WHERE
-    @{[
-        join(
-            "\nAND ",
-            map {
-                ($old->{$_} eq 'NULL') ?
-                "$_ IS NULL"           :
-                "$_ = $old->{$_}"
-            } sort keys %$old
-        )
-    ]}
+    @{[ make_pairs({
+        payload => $params->{payload},
+        which => 'old',
+        joiner => "\nAND ",
+        transform_null => 'true'
+    }) ]}
 SQL
     elog NOTICE, "SQL is\n$sql" if $_SHARED{debug};
-    my $sth = $_SHARED{dbh}{ $data_source_id }->prepare($sql);
-    $sth->execute();
-    $sth->finish();
+    $_SHARED{dbh}{ $data_source_id }->do($sql);
+}
+
+sub make_pairs {
+    my ($params) = @_;
+    elog ERROR, "In make_pairs, must pass a payload!"
+        unless (defined $params->{payload});
+    elog ERROR, "In make_pairs, payload must be a hash reference!"
+        unless (ref $params->{payload} eq 'HASH');
+    elog NOTICE, "In make_pairs, parameters are:\n". Dump($params) if $_SHARED{debug};
+    my @pairs;
+    foreach my $key (
+        keys %{ $params->{payload} }
+    ) {
+        next unless $key =~ m/^(.?)$params->{which}_(.*)/;
+        my $left = "$1$2";
+        elog NOTICE, "In make_pairs, raw key is $key, cooked key is $left" if $_SHARED{debug};
+        if (
+            defined $params->{transform_null} &&  # In a WHERE clause,
+           !defined $params->{payload}{$key}      # turn undef into IS NULL
+        ) {
+            push @pairs, "$left IS NULL";
+        }
+        else {
+            push @pairs, "$left = " . $_SHARED{dbh}{ $data_source_id }->quote(
+                $params->{payload}{$key}
+            );
+        }
+    }
+    my $ret = 
+        join (
+            $params->{joiner},
+            @pairs,
+        );
+    elog NOTICE, "In make_pairs, the pairs are:\n". Dump(\@pairs) if $_SHARED{debug};
+    return $ret;
 }
 
 $$;
@@ -1132,7 +1163,7 @@ my $rv = spi_exec_query($set_search);
 my $types = "'TABLE','VIEW'";
 
 
-spi_exec_query("SELECT cache_connection( $params->{data_source_id} )");
+spi_exec_query("SELECT dbi_link.cache_connection( $params->{data_source_id} )");
 
 my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
     $params->{remote_catalog},
@@ -1493,7 +1524,11 @@ if ($result->{processed} == 1) {
                 )->{rows}[0]{search_path}
             )
         );
-    spi_exec_query("UPDATE pg_catalog.pg_settings SET setting = '$search_path' WHERE name = 'search_path'");
+    spi_exec_query(<<SQL);
+UPDATE pg_catalog.pg_settings
+SET setting = '$search_path'
+WHERE name = 'search_path'
+SQL
 
     spi_exec_query("DROP SCHEMA $identifier CASCADE");
 }
