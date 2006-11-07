@@ -21,7 +21,7 @@ WHERE
     name = 'search_path'
 ;
 
-SELECT make_accessor_functions(
+SELECT dbi_link.make_accessor_functions(
     'dbi:mysql:database=sakila;host=localhost',
     'root',
     'foobar',

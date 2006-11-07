@@ -17,7 +17,7 @@ my $dbh = DBI->connect(
     },
 );
 
-my @methods = qw(table_info column_info list_tables);
+my @methods = qw(table_info column_info list_tables quote quote_ident);
 foreach my $method (@methods) {
      if ( $dbh->can($method) ) {
          print "Handle has method $method. w00t!"
@@ -41,10 +41,16 @@ foreach my $table (@tables) {
     print "    column names:\n", join("\n        ", @{ $sth->{NAME} });
     print "    number of fields: $sth->{NUM_OF_FIELDS}";
     print "    table info for $table:\n", Dump($dbh->{csv_tables});
-    while(my $row = $sth->fetchrow_hashref) {
-        print map { "\t$_ => $row->{$_}" } @{ $sth->{NAME} };
-    }
+    my $whole_table = $sth->fetchall_arrayref({});
+#################################################################
+#                                                               #
+#     while(my $row = $sth->fetchrow_hashref) {                 #
+#         print map { "\t$_ => $row->{$_}" } @{ $sth->{NAME} }; #
+#     }                                                         #
+#                                                               #
+#################################################################
     $sth->finish();
+    print Dump($whole_table);
 }
 
 $dbh->disconnect;

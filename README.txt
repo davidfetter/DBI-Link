@@ -3,6 +3,20 @@ Here is how to use what you have:
 As database superuser (often postgres, but check for your system), do
 the following:
 
+Requirements:
+
+* PostgreSQL 8.1.4 or later installed and running.  It must have
+PL/Perl built with it.  Most distributions of PostgreSQL have this.
+
+* PostgreSQL superuser (postgres) access required for the installation
+
+You will need the following Perl modules, which you can get packaged
+for your operating system or (in extremis) from CPAN:
+
+* DBI 1.43 or later
+* DBDs for each type of remote data source (DBD::Oracle, DBD::Sybase, etc.)
+* YAML
+
 Install DBI-Link Software:
 
 1. Create or choose a previously created database where DBI-Link will operate.
