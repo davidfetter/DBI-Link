@@ -1699,7 +1699,7 @@ my $sql;
 $sql->{tables} = <<SQL;
 SELECT
     'GRANT SELECT, INSERT, UPDATE, DELETE ON dbi_link.' || 
-    quote_ident(c.relname) ||
+    quote_ident(c.relname) ||
     ' TO $user' AS the_command
 FROM
     pg_catalog.pg_class c
