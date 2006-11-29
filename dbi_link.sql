@@ -421,6 +421,7 @@ SQL
 get_dbh => sub {
     use YAML;
     use DBI;
+    local %ENV;
     my ($connection_info) = @_;
     my $attribute_hashref;
     warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
@@ -1669,3 +1670,74 @@ COMMENT ON FUNCTION dbi_link.rollback(
 Wraps the DBI function of the same name.
 $$;
 
+
+CREATE OR REPLACE FUNCTION dbi_link.make_dbi_link_role(in_role_name TEXT)
+RETURNS VOID
+STRICT
+LANGUAGE plperlU
+AS $$
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+
+my $user = $_SHARED{quote_ident}->($_[0]);
+
+my $do_once = {
+    create_role => "CREATE ROLE $user",
+    grant_db => "GRANT ALL ON DATABASE " .
+                spi_exec_query(
+                    'SELECT current_database()'
+                )->{rows}[0]{current_database} .
+                " TO $user",
+    grant_usage => "GRANT USAGE ON SCHEMA dbi_link TO $user",
+};
+
+foreach my $once (sort keys %$do_once) {
+    warn $do_once->{$once} if $_SHARED{debug};
+    spi_exec_query($do_once->{$once});
+}
+
+my $sql;
+$sql->{tables} = <<SQL;
+SELECT
+    'GRANT SELECT, INSERT, UPDATE, DELETE ON dbi_link.' || 
+    quote_ident(c.relname) ||
+    ' TO $user' AS the_command
+FROM
+    pg_catalog.pg_class c
+LEFT JOIN
+    pg_catalog.pg_namespace n
+    ON (n.oid = c.relnamespace)
+WHERE
+    c.relkind IN ('r','v')
+AND
+    n.nspname = 'dbi_link'
+SQL
+
+$sql->{functions} = <<SQL;
+SELECT
+    'GRANT EXECUTE ON FUNCTION dbi_link.' ||
+    quote_ident(p.proname) ||
+    '(' ||
+    pg_catalog.oidvectortypes(p.proargtypes) ||
+    ') TO $user' AS the_command
+FROM
+    pg_catalog.pg_proc p
+JOIN
+    pg_catalog.pg_namespace n
+    ON (n.oid = p.pronamespace)
+WHERE
+    n.nspname = 'dbi_link'
+SQL
+
+foreach my $key (keys %$sql) {
+    warn $sql->{$key} if $_SHARED{debug};
+    my $result = spi_exec_query($sql->{$key});
+    die $result->{status} unless $result->{status} eq 'SPI_OK_SELECT';
+    foreach my $i (0 .. $result->{processed}) {
+        my $the_command = $result->{rows}[$i]{the_command};
+        warn $the_command if $_SHARED{debug};
+        spi_exec_query($the_command);
+    }
+}
+$$;
+
+SELECT dbi_link.make_dbi_link_role('dbi_link_role');
