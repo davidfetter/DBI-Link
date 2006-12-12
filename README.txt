@@ -4,6 +4,7 @@ As database superuser (often postgres, but check for your system), do
 the following:
 
 Requirements:
+-------------
 
 * PostgreSQL 8.1.4 or later installed and running.  It must have
 PL/Perl built with it.  Most distributions of PostgreSQL have this.
@@ -18,6 +19,7 @@ for your operating system or (in extremis) from CPAN:
 * YAML
 
 Install DBI-Link Software:
+--------------------------
 
 1. Create or choose a previously created database where DBI-Link will operate.
 For the rest of this document, that database's name is 'outreach'.  To create
@@ -41,10 +43,12 @@ available.
     psql -f dbi_link.sql outreach
 
 Add Remote Database Connection
+------------------------------
 
 Do the following, with the appropriate parameters.  "Appropriate parameters"
 come from the perldoc of the appropriate DBD, in this case, DBD::mysql, except
 for "local schema," which you must supply.  "local schema" must not yet exist.
+You can use Pg for PostgreSQL, Oracle for Oracle for data source name.
 
 /* 
  * Data source:     dbi:mysql:database=world;host=localhost
@@ -84,7 +88,8 @@ RaiseError: 1
 );
 
 
-USING THE REMOTE DB CONNECTION
+Using the remote database connection:
+-------------------------------------
 
 SELECT
     initcap(title)
@@ -105,3 +110,10 @@ FROM
 WHERE
     local_schema = 'sakila';
 
+
+Uninstall DBI-Link Software:
+----------------------------
+
+To uninstall dbi-link, simply run the following:
+
+DROP SCHEMA dbi_link CASCADE;
