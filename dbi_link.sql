@@ -1620,6 +1620,10 @@ RETURNS VOID
 STRICT
 LANGUAGE plperlU
 AS $$
+my $query = "SELECT dbi_link.cache_connection( $_[0] )";
+warn $query if $_SHARED{debug};
+my $rv = spi_exec_query($query);
+
 spi_exec_query('SELECT dbi_link.dbi_link_init()');
 my $rv = $_SHARED{dbh}{ $_[0] }->begin_work;
 warn $rv if $_SHARED{debug};
@@ -1732,7 +1736,7 @@ foreach my $key (keys %$sql) {
     warn $sql->{$key} if $_SHARED{debug};
     my $result = spi_exec_query($sql->{$key});
     die $result->{status} unless $result->{status} eq 'SPI_OK_SELECT';
-    foreach my $i (0 .. $result->{processed}) {
+    foreach my $i (0 .. $result->{processed}-1) {
         my $the_command = $result->{rows}[$i]{the_command};
         warn $the_command if $_SHARED{debug};
         spi_exec_query($the_command);
