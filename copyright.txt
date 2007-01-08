@@ -1,4 +1,4 @@
-Copyright (c) 2004-2006, David Fetter
+Copyright (c) 2004-2007, David Fetter
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
