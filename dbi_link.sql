@@ -1173,7 +1173,11 @@ my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
     $types
 );
 
+my %dup_tabs = (); # Fix for Oracle/Linux/x86_64 issue.
+
 while(my $table = $sth->fetchrow_hashref) {
+    next if exists $dup_tabs{ $table->{TABLE_NAME} };
+    ++$dup_tabs{ $table->{TABLE_NAME} };
     my $base_name = $_SHARED{quote_ident}->(
         $table->{TABLE_NAME}
     );
@@ -1203,7 +1207,10 @@ while(my $table = $sth->fetchrow_hashref) {
 # integer-looking things into INTEGERs, everything else into TEXT.   #
 #                                                                    #
 ######################################################################
+    my %dup_cols = (); # Fix for Oracle/Linux/x86_64 issue.
     while(my $column = $sth2->fetchrow_hashref) {
+        next if exists $dup_cols{ $column->{COLUMN_NAME} };
+        ++$dup_cols{ $column->{COLUMN_NAME} };
         push @raw_cols, $column->{COLUMN_NAME};
         my $cn = $_SHARED{quote_ident}->(
             $column->{COLUMN_NAME}
@@ -1674,8 +1681,7 @@ COMMENT ON FUNCTION dbi_link.rollback(
 Wraps the DBI function of the same name.
 $$;
 
-
-CREATE OR REPLACE FUNCTION dbi_link.make_dbi_link_role(in_role_name TEXT)
+CREATE OR REPLACE FUNCTION dbi_link.grant_admin_role(in_role_name TEXT)
 RETURNS VOID
 STRICT
 LANGUAGE plperlU
@@ -1685,7 +1691,6 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 my $user = $_SHARED{quote_ident}->($_[0]);
 
 my $do_once = {
-    create_role => "CREATE ROLE $user",
     grant_db => "GRANT ALL ON DATABASE " .
                 spi_exec_query(
                     'SELECT current_database()'
@@ -1702,12 +1707,84 @@ foreach my $once (sort keys %$do_once) {
 my $sql;
 $sql->{tables} = <<SQL;
 SELECT
-    'GRANT SELECT, INSERT, UPDATE, DELETE ON dbi_link.' || 
+    CASE WHEN c.relkind = 'S' THEN
+        'GRANT SELECT, UPDATE ON dbi_link.'
+    ELSE
+        'GRANT SELECT, INSERT, UPDATE, DELETE ON dbi_link.'
+    END || 
     quote_ident(c.relname) ||
     ' TO $user' AS the_command
 FROM
     pg_catalog.pg_class c
 LEFT JOIN
+    pg_catalog.pg_namespace n
+    ON (n.oid = c.relnamespace)
+WHERE
+    c.relkind IN ('r','v','S')
+AND
+    n.nspname = 'dbi_link'
+SQL
+
+$sql->{functions} = <<SQL;
+SELECT
+    'GRANT EXECUTE ON FUNCTION dbi_link.' ||
+    quote_ident(p.proname) ||
+    '(' ||
+    pg_catalog.oidvectortypes(p.proargtypes) ||
+    ') TO $user' AS the_command
+FROM
+    pg_catalog.pg_proc p
+JOIN
+    pg_catalog.pg_namespace n
+    ON (n.oid = p.pronamespace)
+WHERE
+    n.nspname = 'dbi_link'
+SQL
+
+foreach my $key (keys %$sql) {
+    warn $sql->{$key} if $_SHARED{debug};
+    my $result = spi_exec_query($sql->{$key});
+    die $result->{status} unless $result->{status} eq 'SPI_OK_SELECT';
+    foreach my $i (0 .. $result->{processed}-1) {
+        my $the_command = $result->{rows}[$i]{the_command};
+        warn $the_command if $_SHARED{debug};
+        spi_exec_query($the_command);
+    }
+}
+$$;
+
+/*
+    CREATE ROLE dbi_link_admin;
+    SELECT dbi_link.grant_admin_role('dbi_link_admin');
+*/
+
+CREATE OR REPLACE FUNCTION dbi_link.grant_user_role(in_role_name TEXT)
+RETURNS VOID
+STRICT
+LANGUAGE plperlU
+AS $$
+spi_exec_query('SELECT dbi_link.dbi_link_init()');
+
+my $user = $_SHARED{quote_ident}->($_[0]);
+
+my $do_once = {
+    grant_usage => "GRANT USAGE ON SCHEMA dbi_link TO $user",
+};
+
+foreach my $once (sort keys %$do_once) {
+    warn $do_once->{$once} if $_SHARED{debug};
+    spi_exec_query($do_once->{$once});
+}
+
+my $sql;
+$sql->{tables} = <<SQL;
+SELECT
+    'GRANT SELECT ON dbi_link.'
+    quote_ident(c.relname) ||
+    ' TO $user' AS the_command
+FROM
+    pg_catalog.pg_class c
+JOIN
     pg_catalog.pg_namespace n
     ON (n.oid = c.relnamespace)
 WHERE
@@ -1744,4 +1821,111 @@ foreach my $key (keys %$sql) {
 }
 $$;
 
-SELECT dbi_link.make_dbi_link_role('dbi_link_role');
+/*
+    CREATE ROLE dbi_link_user;
+    SELECT dbi_link.grant_user_role('dbi_link_user');
+*/
+
+CREATE OR REPLACE FUNCTION dbi_link.grant_usage_on_schema_to_role(
+    in_schema TEXT,
+    in_role TEXT
+)
+RETURNS VOID
+STRICT
+LANGUAGE plperlU
+AS $$
+
+my ($schema, $role) = @_;
+$schema = $_SHARED{quote_literal}->{$schema};
+$role = $_SHARED{quote_literal}->{$role};
+
+my $sql = "SELECT count(*) AS the_count FROM pg_catalog.pg_namespace WHERE npsname = $schema";
+my $result = spi_exec_query($sql);
+die "Error executing\n    $sql\nError: $result->{status}"
+    unless $result->{status} eq 'SPI_OK_SELECT';
+die "No such schema as $_[0]" unless $result->{rows}[0]{the_count};
+
+$sql = "SELECT count(*) FROM pg_catalog.pg_roles WHERE rolname = $role";
+$result = spi_exec_query($sql);
+die "Error executing\n    $sql\nError: $result->{status}"
+    unless $result->{status} eq 'SPI_OK_SELECT';
+die "No such schema as $_[1]" unless $result->{rows}[0]{the_count};
+
+$sql = <<SQL;
+SELECT
+    'GRANT ' ||
+    CASE
+        WHEN c.relkind = 'r' THEN 'INSERT'
+        ELSE 'SELECT, INSERT, UPDATE, DELETE'
+    END ||
+    ' ON $schema.'
+    quote_ident(c.relname) ||
+    ' TO $role' AS the_command
+FROM
+    pg_catalog.pg_class c
+JOIN
+    pg_catalog.pg_namespace n
+    ON (n.oid = c.relnamespace)
+WHERE
+    c.relkind IN ('r','v')
+AND
+    n.nspname = $schema
+SQL
+
+$result = spi_exec_query($sql);
+die $result->{status} unless $result->{status} eq 'SPI_OK_SELECT';
+foreach my $i (0 .. $result->{processed}-1) {
+    my $the_command = $result->{rows}[$i]{the_command};
+    warn $the_command if $_SHARED{debug};
+    spi_exec_query($the_command);
+}
+$$;
+
+CREATE OR REPLACE FUNCTION dbi_link.dbi_quote(
+    in_data_source_id INTEGER,
+    in_text TEXT
+)
+RETURNS TEXT
+STRICT
+LANGUAGE plperlU
+AS $$
+spi_exec_query("SELECT dbi_link.cache_connection( $_[0] )");
+
+return $_SHARED{dbh}{ $_[0] }->quote(
+    $_[1]
+);
+$$;
+
+COMMENT ON FUNCTION dbi_link.dbi_quote(
+    in_data_source_id INTEGER,
+    in_text TEXT
+)
+IS $$
+This uses the DBI quote mechanism for a given data_source_id to quote
+a string.
+$$;
+
+CREATE OR REPLACE FUNCTION dbi_link.dbi_quote_identifier(
+    in_data_source_id INTEGER,
+    in_text TEXT
+)
+RETURNS TEXT
+STRICT
+LANGUAGE plperlU
+AS $$
+spi_exec_query("SELECT dbi_link.cache_connection( $_[0] )");
+
+return $_SHARED{dbh}{ $_[0] }->quote_identifier(
+    $_[1]
+);
+$$;
+
+COMMENT ON FUNCTION dbi_link.dbi_quote_identifier(
+    in_data_source_id INTEGER,
+    in_text TEXT
+)
+IS $$
+This uses the DBI quote_identifier mechanism for a given
+data_source_id to quote a string.
+$$;
+
