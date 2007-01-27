@@ -7,7 +7,7 @@ Summary:	Partial implementation of the SQL/MED portion of the SQL:2003 specifica
 Group:		Applications/Databases
 License:	BSD
 URL:		http://pgfoundry.org/projects/dbi-link/
-Source0:	http://pgfoundry.org/frs/download.php/1128/%{sname}-%{version}.tar.bz2
+Source0:	http://pgfoundry.org/frs/download.php/1235/%{sname}-%{version}.tar.bz2
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 Requires:	postgresql-server, perl, perl-DBI >= 1.52, perl-YAML >= 0.62
 BuildArch:	noarch
