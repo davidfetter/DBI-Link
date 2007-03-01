@@ -177,27 +177,27 @@ die "In dbi_link.add_dbi_connection_environment, settings is a >@{[
 my $count = 0;
 foreach my $setting (@$settings) {
     die "In dbi_link.add_dbi_connection_environment, setting $count is not even a hash reference"
-        unless (ref($settings) eq 'HASH');
+        unless (ref($setting) eq 'HASH');
     die "In dbi_link.add_dbi_connection_environment, setting $count does have the proper components"
         unless (
-            exists $settings->{env_name} &&
-            exists $settings->{env_value} &&
-            exists $settings->{env_action}
+            exists $setting->{env_name} &&
+            exists $setting->{env_value} &&
+            exists $setting->{env_action}
         );
     die "In dbi_link.add_dbi_connection_environment, setting $count does have the proper right-hand sides"
         if (
-            ref($settings->{env_name}) ||
-            ref($settings->{env_value}) ||
-            ref($settings->{env_action})
+            ref($setting->{env_name}) ||
+            ref($setting->{env_value}) ||
+            ref($setting->{env_action})
         );
-    foreach my $setting (qw(env_name env_value env_action)) {
-        if (defined $settings->{$setting}) {
-            $settings->{$setting} = $_SHARED{quote_literal}->(
-                $settings->{$setting}
+    foreach my $sub_setting (qw(env_name env_value env_action)) {
+        if (defined $setting->{$sub_setting}) {
+            $setting->{$sub_setting} = $_SHARED{quote_literal}->(
+                $setting->{$sub_setting}
             );
         }
         else {
-            $settings->{$setting} = 'NULL';
+            $setting->{$sub_setting} = 'NULL';
         }
     }
     my $sql = <<SQL;
@@ -209,9 +209,9 @@ INSERT INTO dbi_link.dbi_connection_environment (
 )
 VALUES (
     $data_source_id,
-    $settings->{env_name},
-    $settings->{env_value},
-    $settings->{env_action}
+    $setting->{env_name},
+    $setting->{env_value},
+    $setting->{env_action}
 )
 SQL
     warn "In dbi_link.add_dbi_connection_environment, executing:\n$sql";
@@ -399,9 +399,10 @@ SELECT
     dbh_attributes,
     remote_schema,
     remote_catalog,
-    local_schema
+    local_schema,
+    dbi_connection_environment
 FROM
-    dbi_link.dbi_connection
+    dbi_link.dbi_all_connection_info
 WHERE
     data_source_id = $args->{data_source_id}
 SQL
@@ -440,9 +441,10 @@ get_dbh => sub {
     }
 
     if (defined $connection_info->{dbi_connection_environment}) {
+        my $parsed_env = Load($connection_info->{dbi_connection_environment});
         die "In get_dbh, dbi_connection_environment must be an array reference."
-            unless (ref($connection_info->{dbi_connection_environment}) eq 'ARRAY');
-        foreach my $setting (@$connection_info->{dbi_connection_environment}) {
+            unless (ref($parsed_env) eq 'ARRAY');
+        foreach my $setting (@$parsed_env) {
             foreach my $key (qw(env_name env_value env_action)) {
                 die "In get_dbh, missing key $key"
                     unless (defined $setting->{$key});
