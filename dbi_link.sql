@@ -1213,19 +1213,28 @@ while(my $table = $sth->fetchrow_hashref) {
     while(my $column = $sth2->fetchrow_hashref) {
         next if exists $dup_cols{ $column->{COLUMN_NAME} };
         ++$dup_cols{ $column->{COLUMN_NAME} };
-        push @raw_cols, $column->{COLUMN_NAME};
+
+        ###############################################################
+        #                                                             #
+        # The following uses ORDINAL_POSITION to order columns.  You  #
+        # should not be depending on column order in the first place, #
+        # but it is here as a courtesy ;)                             #
+        #                                                             #
+        ###############################################################
+        $raw_cols[ $column->{ORDINAL_POSITION} - 1 ] = $column->{COLUMN_NAME};
+
         my $cn = $_SHARED{quote_ident}->(
             $column->{COLUMN_NAME}
         );
-        push @cols, $cn;
+        $cols [ $column->{ORDINAL_POSITION} - 1 ] = $cn;
         $comments{ $cn } = $column->{TYPE_NAME};
         warn "Adding column $cn to table $table->{TABLE_NAME}"
             if $_SHARED{debug};
         if ( $column->{TYPE_NAME} =~ /integer/i ) {
-            push @types, 'INTEGER';
+            push $types[ $column->{ORDINAL_POSITION} - 1 ] = 'INTEGER';
         }
         else {
-            push @types, 'TEXT';
+            push $types[ $column->{ORDINAL_POSITION} - 1 ] = 'TEXT';
         }
     }
     $sth2->finish;
