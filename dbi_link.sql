@@ -1231,10 +1231,10 @@ while(my $table = $sth->fetchrow_hashref) {
         warn "Adding column $cn to table $table->{TABLE_NAME}"
             if $_SHARED{debug};
         if ( $column->{TYPE_NAME} =~ /integer/i ) {
-            push $types[ $column->{ORDINAL_POSITION} - 1 ] = 'INTEGER';
+            $types[ $column->{ORDINAL_POSITION} - 1 ] = 'INTEGER';
         }
         else {
-            push $types[ $column->{ORDINAL_POSITION} - 1 ] = 'TEXT';
+            $types[ $column->{ORDINAL_POSITION} - 1 ] = 'TEXT';
         }
     }
     $sth2->finish;
