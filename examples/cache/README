@@ -1,0 +1,10 @@
+README.ODBC:
+When building DBD::ODBC and using libiodbc, you might need to specify
+the directory of the iODBC includes. I did this by exporting
+CFLAGS="-I/usr/include/iodbc", in addition to the other environment
+variables Makefile.pl expects.
+
+In the example directory, the username is LIVE:DAVIDB simply due to a
+quirk of the system I'm connecting to. (Intersystem's Cache' splits
+the part off before the colon as something similar to a namespace.)
+
