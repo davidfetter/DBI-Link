@@ -1790,7 +1790,7 @@ foreach my $once (sort keys %$do_once) {
 my $sql;
 $sql->{tables} = <<SQL;
 SELECT
-    'GRANT SELECT ON dbi_link.'
+    'GRANT SELECT ON dbi_link.' ||
     quote_ident(c.relname) ||
     ' TO $user' AS the_command
 FROM
