@@ -18,6 +18,12 @@ for your operating system or (in extremis) from CPAN:
 * DBDs for each type of remote data source (DBD::Oracle, DBD::Sybase, etc.)
 * YAML
 
+Worked Examples:
+---------------
+
+See the examples/ directory here for your DBMS back-end.  If you don't see
+yours there, make a feature request, ideally including your worked example.
+
 Install DBI-Link Software:
 --------------------------
 

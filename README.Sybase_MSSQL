@@ -1,7 +1,8 @@
 When connecting to a Sybase or MS-SQL server, you'll need DBD::Sybase.
 So far, I've tested DBD::Sybase built with the excellent FreeTDS
 library which should be available as a package for your operating
-system/distribution.
+system/distribution.  Use version 0.64 (at the time of this writing)
+or higher.
 
 GOTCHA: On Red Hat on an x86_64 (AMD Opteron) machine, the DBD::Sybase
 RPM packages for Red Hat doesn't build against the unmodified FreeTDS
@@ -10,3 +11,4 @@ libraries because that package assumes they are in /usr/lib instead of
 symlink the appropriate .so's from /usr/lib64 to /usr/lib.  TODO: make
 the .spec file work cross-platform and send upstream.
 
+MS-SQL's default port is 1433.  Check examples/mssql for an example.
