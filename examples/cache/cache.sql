@@ -9,17 +9,7 @@
  * local schema:    cache
  */
 
-UPDATE
-    pg_catalog.pg_settings
-SET
-    setting =
-        CASE WHEN setting ~ 'dbi_link'
-        THEN setting
-        ELSE 'dbi_link,' || setting
-        END
-WHERE
-    name = 'search_path'
-;
+SELECT dbi_link.prepend_to_search_path('dbi_link');
 
 SELECT make_accessor_functions(
     'dbi:ODBC:Cache',

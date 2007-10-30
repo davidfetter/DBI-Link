@@ -4,18 +4,25 @@ COMMENT ON SCHEMA dbi_link IS $$
 This schema holds all the functionality needed for using dbi-link.
 $$;
 
+CREATE OR REPLACE FUNCTION dbi_link.prepend_to_search_path(TEXT)
+RETURNS TEXT
+LANGUAGE SQL
+AS $$
 UPDATE
     pg_catalog.pg_settings
 SET
     setting = CASE
               WHEN
-                  setting LIKE '%dbi_link%'
+                  $1 = ANY(string_to_array(setting,','))
               THEN
                   setting
-              ELSE 'dbi_link,' || setting
+              ELSE $1 || ',' || setting
               END
 WHERE
     name = 'search_path';
+$$;
+
+SELECT dbi_link.prepend_to_search_path('dbi_link');
 
 CREATE OR REPLACE FUNCTION dbi_link.version_integer()
 RETURNS INTEGER
@@ -1147,18 +1154,7 @@ my $identifier_local_schema = $_SHARED{quote_ident}->(
     $params->{local_schema}
 );
 my $set_search = <<SQL;
-UPDATE
-    pg_catalog.pg_settings
-SET
-    setting = CASE
-        WHEN
-            '$identifier_local_schema' = ANY(string_to_array(setting, ','))
-        THEN
-            setting
-        ELSE
-            '$identifier_local_schema,' || setting
-        END
-WHERE name = 'search_path'
+SELECT dbi_link.prepend_to_search_path('$identifier_local_schema');
 SQL
 
 warn $set_search if $_SHARED{debug};

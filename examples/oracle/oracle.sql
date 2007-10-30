@@ -9,17 +9,7 @@
  * local schema:    hr
  */
 
-UPDATE
-    pg_catalog.pg_settings
-SET
-    setting =
-        CASE WHEN 'dbi_link' = ANY(string_to_array(setting, ','))
-        THEN setting
-        ELSE 'dbi_link,' || setting
-        END
-WHERE
-    name = 'search_path'
-;
+SELECT dbi_link.prepend_to_search_path('dbi_link');
 
 SELECT make_accessor_functions(
     'dbi:Oracle:hr;host=localhost;sid=xe',
