@@ -6,3 +6,6 @@ perl Makefile.PL
 perl -pi -e 's(LD_RUN_PATH.*)(LD_RUN_PATH=$ENV{ORACLE_HOME}/bin)' Makefile
 make && make test && make install
 
+If your Oracle database has more than 1000 tables and views in it, you
+will need to change ora_array_chunk_size to a number large enough to
+contain it.  See examples/oracle/oracle.sql for how to do this.

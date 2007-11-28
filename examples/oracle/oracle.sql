@@ -18,6 +18,7 @@ SELECT make_accessor_functions(
     '---
 AutoCommit: 1
 RaiseError: 1
+ora_array_chunk_size: 65536
 ',
     NULL,
     NULL,
