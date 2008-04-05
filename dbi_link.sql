@@ -554,19 +554,29 @@ remote_exec_dbh => sub {
 },
 
 quote_ident => sub {
-    $_[0] =~ s/'/''/g; # Just in case
-    return spi_exec_query(
-        "SELECT pg_catalog.quote_ident('$_[0]') AS foo",
-        1
+    my $plan = spi_prepare(
+        'SELECT pg_catalog.quote_ident($1) AS foo',
+        'TEXT'
+    );
+    my $quoted = spi_exec_query(
+        $plan,
+        $_[0]
     )->{rows}[0]{foo};
+    spi_freeplan($plan);
+    return $quoted;
 },
 
 quote_literal => sub {
-    $_[0] =~ s/'/''/g; # Just in case
-    return spi_exec_query(
-        "SELECT pg_catalog.quote_literal('$_[0]') AS foo",
-        1
+    my $plan = spi_prepare(
+        'SELECT pg_catalog.quote_literal($1) AS foo',
+        'TEXT'
+    );
+    my $quoted = spi_exec_query(
+        $plan,
+        $_[0]
     )->{rows}[0]{foo};
+    spi_freeplan($plan);
+    return $quoted;
 },
 
 };
