@@ -1,3 +1,13 @@
+If you are using versions of Oracle before 9.2.0.8, 10.2.0.3 or
+11.1.0.6, or have not applied One-Off Patch 3807408 for 10.2.0.1 and
+9.2.0.7 on UNIX, you may run into a bug in Oracle's TNS parser which
+causes it to mess up when it sees command lines like
+
+    postgres: www postgres 192.168.1.1(13243)
+
+It attempts to parse the (13243) part and then fails.  This is fixable
+by upgrading or applying the aforementioned One_off Patch.
+
 When using DBD::Oracle, you need to see to it that it will load
 correctly.  If DBD::Oracle doesn't work correctly, try building
 DBD::Oracle as follows:
