@@ -57,7 +57,7 @@ CREATE TABLE dbi_link.min_pg_version (
 );
 
 INSERT INTO dbi_link.min_pg_version (min_pg_version)
-VALUES (80104);
+VALUES (80119);
 
 CREATE RULE min_pg_version_no_insert AS
     ON INSERT TO dbi_link.min_pg_version

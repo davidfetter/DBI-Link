@@ -6,7 +6,7 @@ the following:
 Requirements:
 -------------
 
-* PostgreSQL 8.1.4 or later installed and running.  It must have
+* PostgreSQL 8.1.19 or later installed and running.  It must have
 PL/Perl built with it.  Most distributions of PostgreSQL have this.
 
 * PostgreSQL superuser (postgres) access required for the installation
