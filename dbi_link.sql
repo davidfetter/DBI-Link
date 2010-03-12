@@ -20,6 +20,7 @@ SET
               END
 WHERE
     name = 'search_path';
+SELECT setting FROM pg_catalog.pg_settings WHERE name = 'search_path';
 $$;
 
 SELECT dbi_link.prepend_to_search_path('dbi_link');
@@ -558,7 +559,7 @@ quote_ident => sub {
         'SELECT pg_catalog.quote_ident($1) AS foo',
         'TEXT'
     );
-    my $quoted = spi_exec_query(
+    my $quoted = spi_exec_prepared(
         $plan,
         $_[0]
     )->{rows}[0]{foo};
@@ -571,7 +572,7 @@ quote_literal => sub {
         'SELECT pg_catalog.quote_literal($1) AS foo',
         'TEXT'
     );
-    my $quoted = spi_exec_query(
+    my $quoted = spi_exec_prepared(
         $plan,
         $_[0]
     )->{rows}[0]{foo};
@@ -819,6 +820,9 @@ warn "In shadow_trigger_function, calling\n    $query" if $_SHARED{debug};
 warn "In shadow_trigger_function, the trigger payload is\n". Dump(\$_TD) if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 
+my $remote_schema = $_SHARED{get_connection_info}->({
+    data_source_id => $data_source_id
+})->{remote_schema};
 my $table = $_TD->{relname};
 warn "Raw table name is $table";
 warn "In trigger on $table, action is $_TD->{new}{iud_action}" if $_SHARED{debug};
@@ -829,6 +833,7 @@ $table =~ s{
     \z                  # End of string.
 }
 {$1}sx;
+$table = $remote_schema . "." . $table if defined $remote_schema;
 warn "Cooked table name is $table";
 
 my $iud = {
@@ -1174,9 +1179,12 @@ my $types = "'TABLE','VIEW'";
 
 spi_exec_query("SELECT dbi_link.cache_connection( $params->{data_source_id} )");
 
+# escape character, default to empty string
+my $esc = $_SHARED{dbh}{ $params->{data_source_id} }->get_info(14) || '';
+(my $escaped_schema = $params->{remote_schema}) =~ s/([_%])/$esc$1/g;
 my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
     $params->{remote_catalog},
-    $params->{remote_schema},
+    $escaped_schema,
     '%',
     $types
 );
@@ -1202,10 +1210,11 @@ while(my $table = $sth->fetchrow_hashref) {
     my (@raw_cols, @cols, @types);
     my %comments = ();
     warn "Getting column info for >$table->{TABLE_NAME}<" if $_SHARED{debug};
+    (my $escaped_table = $table->{TABLE_NAME}) =~ s/([_%])/$esc$1/g;
     my $sth2 = $_SHARED{dbh}{ $params->{data_source_id} }->column_info(
         undef,
-        $params->{remote_schema},
-        $table->{TABLE_NAME},
+        $escaped_schema,
+        $escaped_table,
         '%'
     );
 ######################################################################
@@ -1245,11 +1254,14 @@ while(my $table = $sth->fetchrow_hashref) {
     }
     $sth2->finish;
 
+    my $qualtable = (defined $params->{remote_schema}) ?
+                    ($params->{remote_schema} . '.' . $table->{TABLE_NAME}) :
+                    $table->{TABLE_NAME};
     my $sql = <<SQL;
 CREATE VIEW $identifier_local_schema.$base_name AS
 SELECT * FROM dbi_link.remote_select(
     $params->{data_source_id},
-    'SELECT * FROM $table->{TABLE_NAME}'
+    'SELECT * FROM $qualtable'
 )
 AS (
     @{[join(",\n    ", map {"$cols[$_] $types[$_]"} (0..$#cols)) ]}
