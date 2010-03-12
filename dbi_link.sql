@@ -1,3 +1,5 @@
+SET client_min_messages=ERROR;
+
 CREATE SCHEMA dbi_link;
 
 COMMENT ON SCHEMA dbi_link IS $$
@@ -222,7 +224,7 @@ VALUES (
     $setting->{env_action}
 )
 SQL
-    warn "In dbi_link.add_dbi_connection_environment, executing:\n$sql";
+    warn "In dbi_link.add_dbi_connection_environment, executing:\n$sql" if $_SHARED{debug};
     my $rv = spi_exec_query($sql);
     if ($rv->{status} ne 'SPI_OK_INSERT') {
         die "In dbi_link.add_dbi_connection_environment, could not insert into dbi_link.dbi_connection_environment: $rv->{status}";
@@ -658,7 +660,7 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 
 return if (defined $_SHARED{dbh}{ $_[0] } );
 
-warn "In cache_connection, there's no shared dbh $_[0]";
+warn "In cache_connection, there's no shared dbh $_[0]" if $_SHARED{debug};
 
 my $info = $_SHARED{get_connection_info}->({
     data_source_id => $_[0]
@@ -824,7 +826,7 @@ my $remote_schema = $_SHARED{get_connection_info}->({
     data_source_id => $data_source_id
 })->{remote_schema};
 my $table = $_TD->{relname};
-warn "Raw table name is $table";
+warn "Raw table name is $table" if $_SHARED{debug};
 warn "In trigger on $table, action is $_TD->{new}{iud_action}" if $_SHARED{debug};
 $table =~ s{
     \A                  # Beginning of string.
@@ -834,7 +836,7 @@ $table =~ s{
 }
 {$1}sx;
 $table = $remote_schema . "." . $table if defined $remote_schema;
-warn "Cooked table name is $table";
+warn "Cooked table name is $table" if $_SHARED{debug};
 
 my $iud = {
     I => \&do_insert,
@@ -1267,10 +1269,10 @@ AS (
     @{[join(",\n    ", map {"$cols[$_] $types[$_]"} (0..$#cols)) ]}
 )
 SQL
-    warn $sql;
+    warn $sql if $_SHARED{debug};
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created view $base_name."
+        warn "Created view $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create view $base_name.  $rv->{status}";
@@ -1377,7 +1379,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created INSERT rule on VIEW $base_name."
+        warn "Created INSERT rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create INSERT rule on VIEW $base_name.  $rv->{status}";
@@ -1407,7 +1409,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created UPDATE rule on VIEW $base_name."
+        warn "Created UPDATE rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create UPDATE rule on VIEW $base_name.  $rv->{status}";
@@ -1435,7 +1437,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created DELETE rule on VIEW $base_name."
+        warn "Created DELETE rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create DELETE rule on VIEW $base_name.  $rv->{status}";
