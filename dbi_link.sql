@@ -429,34 +429,18 @@ SQL
     return $rv->{rows}[0];
 },
 
-get_dbh => sub {
+set_environment => sub {
     use YAML;
-    use DBI;
-    local %ENV;
-    my ($connection_info) = @_;
-    my $attribute_hashref;
-    warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
-    ##################################################
-    #                                                #
-    # Here, we get the raw connection info as input. #
-    #                                                #
-    ##################################################
-    unless (
-        defined $connection_info->{data_source} &&  # NOT NULL
-        exists $connection_info->{user_name}    &&
-        exists $connection_info->{auth}         &&
-        exists $connection_info->{dbh_attributes}
-    ) {
-        die "You must provide all of data_source, user_name, auth and dbh_attributes to get a database handle.";
-    }
 
-    if (defined $connection_info->{dbi_connection_environment}) {
-        my $parsed_env = Load($connection_info->{dbi_connection_environment});
-        die "In get_dbh, dbi_connection_environment must be an array reference."
+    my $dbi_connection_environment = $_[0];
+
+    if (defined $dbi_connection_environment) {
+        my $parsed_env = Load($dbi_connection_environment);
+        die "In set_environment, argument must be an array reference."
             unless (ref($parsed_env) eq 'ARRAY');
         foreach my $setting (@$parsed_env) {
             foreach my $key (qw(env_name env_value env_action)) {
-                die "In get_dbh, missing key $key"
+                die "In set_environment, missing key $key"
                     unless (defined $setting->{$key});
             }
             if ($setting->{env_action} eq 'overwrite') {
@@ -480,10 +464,37 @@ get_dbh => sub {
                 }
             }
             else {
-                die "In get_dbh, env_action may only be one of {overwrite, prepend, append}.";
+                die "In set_environment, env_action may only be one of {overwrite, prepend, append}.";
             }
         }
     }
+},
+
+get_dbh => sub {
+    use YAML;
+    use DBI;
+    local %ENV;
+    my ($connection_info) = @_;
+    my $attribute_hashref;
+    warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
+    ##################################################
+    #                                                #
+    # Here, we get the raw connection info as input. #
+    #                                                #
+    ##################################################
+    unless (
+        defined $connection_info->{data_source} &&  # NOT NULL
+        exists $connection_info->{user_name}    &&
+        exists $connection_info->{auth}         &&
+        exists $connection_info->{dbh_attributes}
+    ) {
+        die "You must provide all of data_source, user_name, auth and dbh_attributes to get a database handle.";
+    }
+
+    # set environment variables for connection
+    $_SHARED{set_environment}->(
+        $connection_info->{dbi_connection_environment}
+    );
 
     $attribute_hashref = Load(
         $connection_info->{dbh_attributes}
@@ -1021,6 +1032,12 @@ my $driver_there = spi_exec_query($sql);
 if ($driver_there->{processed} == 0) {
     die "Driver $driver is not available.  Can't look at database."
 }
+
+# set environment variables for initial connection
+local %ENV;
+$_SHARED{set_environment}->(
+    $params->{dbi_connection_environment}
+);
 
 my $attr_href = Load($params->{dbh_attributes});
 my $dbh = DBI->connect(
