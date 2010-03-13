@@ -1,3 +1,5 @@
+SET client_min_messages=ERROR;
+
 CREATE SCHEMA dbi_link;
 
 COMMENT ON SCHEMA dbi_link IS $$
@@ -20,6 +22,7 @@ SET
               END
 WHERE
     name = 'search_path';
+SELECT setting FROM pg_catalog.pg_settings WHERE name = 'search_path';
 $$;
 
 SELECT dbi_link.prepend_to_search_path('dbi_link');
@@ -221,7 +224,7 @@ VALUES (
     $setting->{env_action}
 )
 SQL
-    warn "In dbi_link.add_dbi_connection_environment, executing:\n$sql";
+    warn "In dbi_link.add_dbi_connection_environment, executing:\n$sql" if $_SHARED{debug};
     my $rv = spi_exec_query($sql);
     if ($rv->{status} ne 'SPI_OK_INSERT') {
         die "In dbi_link.add_dbi_connection_environment, could not insert into dbi_link.dbi_connection_environment: $rv->{status}";
@@ -426,34 +429,18 @@ SQL
     return $rv->{rows}[0];
 },
 
-get_dbh => sub {
+set_environment => sub {
     use YAML;
-    use DBI;
-    local %ENV;
-    my ($connection_info) = @_;
-    my $attribute_hashref;
-    warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
-    ##################################################
-    #                                                #
-    # Here, we get the raw connection info as input. #
-    #                                                #
-    ##################################################
-    unless (
-        defined $connection_info->{data_source} &&  # NOT NULL
-        exists $connection_info->{user_name}    &&
-        exists $connection_info->{auth}         &&
-        exists $connection_info->{dbh_attributes}
-    ) {
-        die "You must provide all of data_source, user_name, auth and dbh_attributes to get a database handle.";
-    }
 
-    if (defined $connection_info->{dbi_connection_environment}) {
-        my $parsed_env = Load($connection_info->{dbi_connection_environment});
-        die "In get_dbh, dbi_connection_environment must be an array reference."
+    my $dbi_connection_environment = $_[0];
+
+    if (defined $dbi_connection_environment) {
+        my $parsed_env = Load($dbi_connection_environment);
+        die "In set_environment, argument must be an array reference."
             unless (ref($parsed_env) eq 'ARRAY');
         foreach my $setting (@$parsed_env) {
             foreach my $key (qw(env_name env_value env_action)) {
-                die "In get_dbh, missing key $key"
+                die "In set_environment, missing key $key"
                     unless (defined $setting->{$key});
             }
             if ($setting->{env_action} eq 'overwrite') {
@@ -477,10 +464,37 @@ get_dbh => sub {
                 }
             }
             else {
-                die "In get_dbh, env_action may only be one of {overwrite, prepend, append}.";
+                die "In set_environment, env_action may only be one of {overwrite, prepend, append}.";
             }
         }
     }
+},
+
+get_dbh => sub {
+    use YAML;
+    use DBI;
+    local %ENV;
+    my ($connection_info) = @_;
+    my $attribute_hashref;
+    warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
+    ##################################################
+    #                                                #
+    # Here, we get the raw connection info as input. #
+    #                                                #
+    ##################################################
+    unless (
+        defined $connection_info->{data_source} &&  # NOT NULL
+        exists $connection_info->{user_name}    &&
+        exists $connection_info->{auth}         &&
+        exists $connection_info->{dbh_attributes}
+    ) {
+        die "You must provide all of data_source, user_name, auth and dbh_attributes to get a database handle.";
+    }
+
+    # set environment variables for connection
+    $_SHARED{set_environment}->(
+        $connection_info->{dbi_connection_environment}
+    );
 
     $attribute_hashref = Load(
         $connection_info->{dbh_attributes}
@@ -558,7 +572,7 @@ quote_ident => sub {
         'SELECT pg_catalog.quote_ident($1) AS foo',
         'TEXT'
     );
-    my $quoted = spi_exec_query(
+    my $quoted = spi_exec_prepared(
         $plan,
         $_[0]
     )->{rows}[0]{foo};
@@ -571,7 +585,7 @@ quote_literal => sub {
         'SELECT pg_catalog.quote_literal($1) AS foo',
         'TEXT'
     );
-    my $quoted = spi_exec_query(
+    my $quoted = spi_exec_prepared(
         $plan,
         $_[0]
     )->{rows}[0]{foo};
@@ -657,7 +671,7 @@ spi_exec_query('SELECT dbi_link.dbi_link_init()');
 
 return if (defined $_SHARED{dbh}{ $_[0] } );
 
-warn "In cache_connection, there's no shared dbh $_[0]";
+warn "In cache_connection, there's no shared dbh $_[0]" if $_SHARED{debug};
 
 my $info = $_SHARED{get_connection_info}->({
     data_source_id => $_[0]
@@ -819,8 +833,11 @@ warn "In shadow_trigger_function, calling\n    $query" if $_SHARED{debug};
 warn "In shadow_trigger_function, the trigger payload is\n". Dump(\$_TD) if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 
+my $remote_schema = $_SHARED{get_connection_info}->({
+    data_source_id => $data_source_id
+})->{remote_schema};
 my $table = $_TD->{relname};
-warn "Raw table name is $table";
+warn "Raw table name is $table" if $_SHARED{debug};
 warn "In trigger on $table, action is $_TD->{new}{iud_action}" if $_SHARED{debug};
 $table =~ s{
     \A                  # Beginning of string.
@@ -829,7 +846,8 @@ $table =~ s{
     \z                  # End of string.
 }
 {$1}sx;
-warn "Cooked table name is $table";
+$table = $remote_schema . "." . $table if defined $remote_schema;
+warn "Cooked table name is $table" if $_SHARED{debug};
 
 my $iud = {
     I => \&do_insert,
@@ -1015,6 +1033,12 @@ if ($driver_there->{processed} == 0) {
     die "Driver $driver is not available.  Can't look at database."
 }
 
+# set environment variables for initial connection
+local %ENV;
+$_SHARED{set_environment}->(
+    $params->{dbi_connection_environment}
+);
+
 my $attr_href = Load($params->{dbh_attributes});
 my $dbh = DBI->connect(
     $params->{data_source},
@@ -1174,9 +1198,12 @@ my $types = "'TABLE','VIEW'";
 
 spi_exec_query("SELECT dbi_link.cache_connection( $params->{data_source_id} )");
 
+# escape character, default to empty string
+my $esc = $_SHARED{dbh}{ $params->{data_source_id} }->get_info(14) || '';
+(my $escaped_schema = $params->{remote_schema}) =~ s/([_%])/$esc$1/g;
 my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
     $params->{remote_catalog},
-    $params->{remote_schema},
+    $escaped_schema,
     '%',
     $types
 );
@@ -1202,10 +1229,11 @@ while(my $table = $sth->fetchrow_hashref) {
     my (@raw_cols, @cols, @types);
     my %comments = ();
     warn "Getting column info for >$table->{TABLE_NAME}<" if $_SHARED{debug};
+    (my $escaped_table = $table->{TABLE_NAME}) =~ s/([_%])/$esc$1/g;
     my $sth2 = $_SHARED{dbh}{ $params->{data_source_id} }->column_info(
         undef,
-        $params->{remote_schema},
-        $table->{TABLE_NAME},
+        $escaped_schema,
+        $escaped_table,
         '%'
     );
 ######################################################################
@@ -1245,20 +1273,23 @@ while(my $table = $sth->fetchrow_hashref) {
     }
     $sth2->finish;
 
+    my $qualtable = (defined $params->{remote_schema}) ?
+                    ($params->{remote_schema} . '.' . $table->{TABLE_NAME}) :
+                    $table->{TABLE_NAME};
     my $sql = <<SQL;
 CREATE VIEW $identifier_local_schema.$base_name AS
 SELECT * FROM dbi_link.remote_select(
     $params->{data_source_id},
-    'SELECT * FROM $table->{TABLE_NAME}'
+    'SELECT * FROM $qualtable'
 )
 AS (
     @{[join(",\n    ", map {"$cols[$_] $types[$_]"} (0..$#cols)) ]}
 )
 SQL
-    warn $sql;
+    warn $sql if $_SHARED{debug};
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created view $base_name."
+        warn "Created view $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create view $base_name.  $rv->{status}";
@@ -1365,7 +1396,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created INSERT rule on VIEW $base_name."
+        warn "Created INSERT rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create INSERT rule on VIEW $base_name.  $rv->{status}";
@@ -1395,7 +1426,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created UPDATE rule on VIEW $base_name."
+        warn "Created UPDATE rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create UPDATE rule on VIEW $base_name.  $rv->{status}";
@@ -1423,7 +1454,7 @@ VALUES (
 SQL
     my $rv = spi_exec_query($sql);
     if ($rv->{status} eq 'SPI_OK_UTILITY') {
-        warn "Created DELETE rule on VIEW $base_name."
+        warn "Created DELETE rule on VIEW $base_name." if $_SHARED{debug};
     }
     else {
         die "Could not create DELETE rule on VIEW $base_name.  $rv->{status}";

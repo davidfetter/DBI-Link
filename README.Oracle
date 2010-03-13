@@ -1,3 +1,6 @@
+Connections fail mysteriously with older Oracle versions:
+---------------------------------------------------------
+
 If you are using versions of Oracle before 9.2.0.8, 10.2.0.3 or
 11.1.0.6, or have not applied One-Off Patch 3807408 for 10.2.0.1 and
 9.2.0.7 on UNIX, you may run into a bug in Oracle's TNS parser which
@@ -7,6 +10,9 @@ causes it to mess up when it sees command lines like
 
 It attempts to parse the (13243) part and then fails.  This is fixable
 by upgrading or applying the aforementioned One_off Patch.
+
+DBD::Oracle cannot load Oracle client shared libraries at runtime:
+------------------------------------------------------------------
 
 When using DBD::Oracle, you need to see to it that it will load
 correctly.  If DBD::Oracle doesn't work correctly, try building
@@ -19,3 +25,83 @@ make && make test && make install
 If your Oracle database has more than 1000 tables and views in it, you
 will need to change ora_array_chunk_size to a number large enough to
 contain it.  See examples/oracle/oracle.sql for how to do this.
+
+Environment variables:
+----------------------
+
+Oracle needs certain environment variables to function correctly:
+
+ORACLE_HOME must be set to the directory where the software is installed
+            (not required with Instant Client)
+NLS_LANG    must be of the form <territory>_<language>:<charset>, where
+              <territory> influences settings like the decimal separator
+                          (use AMERICAN if you want a period)
+              <language>  is the language for Oracle error messages
+              <charset>   must be the Oracle character set corresponding
+                          to your PostgreSQL database encoding
+            For example, if your PoatgreSQL database encoding is UTF8, use
+            AMERICAN_AMERICA.AL32UTF8
+TNS_ADMIN   directory containing sqlnet.ora and tnsnames.ora (if you need
+            these files)
+
+Other environment variables influence how numbers, dates and timestamps
+will be displayed and can be useful if you want to process the data with
+PostgreSQL.
+
+You can specify environment variables by passing them in YAML format
+as fifth argument to make_accessor_functions(), for example:
+
+---
+- env_name: ORACLE_HOME
+  env_value: /ORACLE/product/10.2.0
+  env_action: overwrite
+- env_name: NLS_LANG
+  env_value: AMERICAN_AMERICA.AL32UTF8
+  env_action: overwrite
+- env_name: NLS_DATE_FORMAT
+  env_value: "YYYY-MM-DD HH24:MI:SS"
+  env_action: overwrite
+- env_name: NLS_TIMESTAMP_FORMAT
+  env_value: "YYYY-MM-DD HH24:MI:SS.FF"
+  env_action: overwrite
+- env_name: NLS_TIMESTAMP_TZ_FORMAT
+  env_value: "YYYY-MM-DD HH24:MI:SS.FF TZH"
+  env_action: overwrite
+- env_name: TNS_ADMIN
+  env_value: /ORACLE/product/10.2.0/network/admin
+  env_action: overwrite
+- env_name: LDAP_ADMIN
+  env_value: /ORACLE/product/10.2.0/ldap/admin
+  env_action: overwrite
+
+PostgreSQL server crashes with Oracle LDAP directory naming:
+------------------------------------------------------------
+
+If you use LDAP "directory naming" to resolve your Oracle database names,
+DBI-Link may make your backend crash. A message similar to the following will
+be written to the PostgreSQL log file (the example is on Linux):
+
+../../../libraries/libldap/getentry.c:29: ldap_first_entry: Assertion `( (ld)->ld_options.ldo_valid == 0x2 )' failed.
+
+The problem is that both the PostgreSQL server and the Oracle client
+use LDAP API functions:
+PostgreSQL is linked with OpenLDAP for LDAP authentication, while
+Oracle comes with its own implementation of the LDAP API.
+Now these functions have the same names (obeying RFC 1823), but of
+course the implementation is quite different.
+
+When DBI-Link loads the Oracle client shared library, the OpenLDAP
+shared library is already loaded, and (at least on Linux) the first loaded
+function of a certain name is used, so Oracle inadvertedly ends up calling
+OpenLDAP functions, which leads to the crash.
+
+What can you do?
+- Do not use Oracle directory naming, use another naming method instead.
+- Recompile PostgreSQL without --with-ldap (if you don't need it).
+- If you can't do either of the above, and you don't need PostgreSQL's
+  LDAP support, you can force to load the Oracle client shared library
+  first when the PostgreSQL server is started (if your operating system
+  supports that). See the LD_PRELOAD environment variable on Linux.
+
+No matter what you do, you won't be able to use both PostgreSQL's
+and Oracle's LDAP functionality.
