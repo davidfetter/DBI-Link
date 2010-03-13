@@ -1231,7 +1231,7 @@ while(my $table = $sth->fetchrow_hashref) {
     my (@raw_cols, @cols, @types);
     my %comments = ();
     warn "Getting column info for >$table->{TABLE_NAME}<" if $_SHARED{debug};
-    my $escaped_table = $SHARED->quote_ident(
+    my $escaped_table = $_SHARED->quote_ident(
         $table->{TABLE_NAME}
     );
     my $sth2 = $_SHARED{dbh}{ $params->{data_source_id} }->column_info(
@@ -1280,9 +1280,9 @@ while(my $table = $sth->fetchrow_hashref) {
     my $qualtable = (defined $params->{remote_schema}) ?
                     (join(
                             '.',
-                            map{ $SHARED->quote_ident($_) }
+                            map{ $_SHARED->quote_ident($_) }
                             $params->{remote_schema}, $table->{TABLE_NAME})) :
-                    $SHARED->quote_ident($table->{TABLE_NAME});
+                    $_SHARED->quote_ident($table->{TABLE_NAME});
     my $sql = <<SQL;
 CREATE VIEW $identifier_local_schema.$base_name AS
 SELECT * FROM dbi_link.remote_select(
