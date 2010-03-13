@@ -1200,7 +1200,9 @@ spi_exec_query("SELECT dbi_link.cache_connection( $params->{data_source_id} )");
 
 # escape character, default to empty string
 my $esc = $_SHARED{dbh}{ $params->{data_source_id} }->get_info(14) || '';
-(my $escaped_schema = $params->{remote_schema}) =~ s/([_%])/$esc$1/g;
+my $escaped_schema =  $_SHARED{quote_ident}->(
+    $params->{remote_schema
+);
 my $sth = $_SHARED{dbh}{ $params->{data_source_id} }->table_info(
     $params->{remote_catalog},
     $escaped_schema,
@@ -1229,7 +1231,9 @@ while(my $table = $sth->fetchrow_hashref) {
     my (@raw_cols, @cols, @types);
     my %comments = ();
     warn "Getting column info for >$table->{TABLE_NAME}<" if $_SHARED{debug};
-    (my $escaped_table = $table->{TABLE_NAME}) =~ s/([_%])/$esc$1/g;
+    my $escaped_table = $SHARED->quote_ident(
+        $table->{TABLE_NAME}
+    );
     my $sth2 = $_SHARED{dbh}{ $params->{data_source_id} }->column_info(
         undef,
         $escaped_schema,
@@ -1274,8 +1278,11 @@ while(my $table = $sth->fetchrow_hashref) {
     $sth2->finish;
 
     my $qualtable = (defined $params->{remote_schema}) ?
-                    ($params->{remote_schema} . '.' . $table->{TABLE_NAME}) :
-                    $table->{TABLE_NAME};
+                    (join(
+                            '.',
+                            map{ $SHARED->quote_ident($_) }
+                            $params->{remote_schema}, $table->{TABLE_NAME})) :
+                    $SHARED->quote_ident($table->{TABLE_NAME});
     my $sql = <<SQL;
 CREATE VIEW $identifier_local_schema.$base_name AS
 SELECT * FROM dbi_link.remote_select(
