@@ -1,0 +1,162 @@
+CREATE TABLE dbi_link.type_map (
+    pg_type TEXT NOT NULL DEFAULT 'TEXT',
+    remote_type TEXT,
+    remote_to_pg TEXT,
+    pg_to_remote TEXT,
+    remote_driver TEXT,
+    data_source_id INTEGER
+                   REFERENCES dbi_link.dbi_connection(data_source_id)
+                   ON DELETE CASCADE
+                   ON UPDATE CASCADE,
+    remote_table TEXT,
+    remote_column TEXT,
+    CHECK (
+        COALESCE(
+            remote_driver, 
+            data_source_id,
+            remote_table,
+            remote_column
+        ) IS NULL
+        OR
+        (
+            remote_driver IS NOT NULL
+        AND
+            data_source_id IS NULL
+        AND
+            remote_table IS NULL
+        AND
+            remote_column IS NULL
+        )
+        OR
+        (
+            remote_driver IS NULL
+        AND
+            data_source_id IS NOT NULL
+        AND
+            remote_table IS NULL
+        AND
+            remote_column IS NULL
+        )
+        OR
+        (
+            remote_driver IS NULL
+        AND
+            data_source_id IS NOT NULL
+        AND
+            remote_table IS NOT NULL
+        AND
+            remote_column IS NULL
+        )
+        OR
+        (
+            remote_driver IS NULL
+        AND
+            data_source_id IS NOT NULL
+        AND
+            remote_table IS NOT NULL
+        AND
+            remote_column IS NOT NULL
+        )
+    )
+);
+
+COMMENT ON TABLE dbi_link.type_map IS $$
+This is far and away the most byzantine table in the system, but at
+that, I have not yet figured out how to make it simpler.  Its job is
+to drive all the pg <-> remote type mappings.
+
+For each type on the remote side, have a Postgres type to which it
+maps.  Rules about mapping are embodied in the table as follows:
+
+1.  If a per-column mapping exists, use it.
+
+2.  If a per-column mapping does not exist, but a per-table mapping
+does, use it.
+
+3.  If neither a per-column nor a per-table mapping exists and a
+per-connection mapping does, use it.
+
+4.  If none of the above exist, use a per-driver (Oracle, e.g.)
+default mapping.  The driver column is not NULL only for the default
+type.  This row will always exist, although in the case of typeless
+systems (CSV, Excel, SQLite, etc.), it will be set to TEXT.
+
+5.  For a completely unknown system, default to TEXT for all columns.
+$$;
+
+INSERT INTO dbi_link.type_map (
+    pg_type,
+    remote_type,
+    remote_to_pg,
+    pg_to_remote,
+    remote_driver,
+    data_source_id,
+    remote_table,
+    remote_column
+)
+VALUES (
+    DEFAULT,
+    DEFAULT,
+    DEFAULT,
+    DEFAULT,
+    DEFAULT,
+    DEFAULT,
+    DEFAULT,
+    DEFAULT
+);
+
+CREATE UNIQUE INDEX only_one_default_default
+    ON dbi_link.type_map(pg_type)
+    WHERE
+        COALESCE(
+            remote_driver, 
+            data_source_id,
+            remote_table,
+            remote_column
+        ) IS NULL;
+
+CREATE UNIQUE INDEX only_one_default_remote_null_type
+    ON dbi_link.type_map(pg_type, remote_driver)
+    WHERE
+        remote_type IS NULL
+    AND
+        remote_driver IS NOT NULL;
+
+CREATE UNIQUE INDEX only_one_data_source_remote_null_type
+    ON dbi_link.type_map(pg_type, data_source_id)
+    WHERE
+        remote_type IS NULL
+    AND
+        remote_driver IS NULL
+    AND
+        data_source_id IS NOT NULL
+    AND
+        remote_table IS NULL
+    AND
+        remote_column IS NULL;
+
+CREATE UNIQUE INDEX only_one_per_table_remote_null_type
+    ON dbi_link.type_map(pg_type, data_source_id, remote_table)
+    WHERE
+        remote_type IS NULL
+    AND
+        remote_driver IS NULL
+    AND
+        data_source_id IS NOT NULL
+    AND
+        remote_table IS NOT NULL
+    AND
+        remote_column IS NULL;
+
+CREATE UNIQUE INDEX only_one_per_column_remote_null_type
+    ON dbi_link.type_map(pg_type, data_source_id, remote_table, remote_column)
+    WHERE
+        remote_type IS NULL
+    AND
+        remote_driver IS NULL
+    AND
+        data_source_id IS NOT NULL
+    AND
+        remote_table IS NOT NULL
+    AND
+        remote_column IS NOT NULL;
