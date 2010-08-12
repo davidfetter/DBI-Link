@@ -109,7 +109,7 @@ RETURNS boolean
 STRICT
 LANGUAGE plperlu
 AS $$
-use DBI 1.43;
+use DBI 1.609;
 my @args = DBI->parse_dsn($_[0]);
 if (defined @args) {
     return 1;
