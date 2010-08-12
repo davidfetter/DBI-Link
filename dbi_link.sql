@@ -50,9 +50,9 @@ FROM
 $$;
 
 COMMENT ON FUNCTION dbi_link.version_integer() IS $$
-This gets the integer version number e.g. 80200.  It will be used for
+This gets the integer version number e.g. 80400.  It will be used for
 turning on/off PostgreSQL version-specific goodies.  Thanks to Andrew
-of Supernews for this.
+Gierth for this.
 $$;
 
 CREATE TABLE dbi_link.min_pg_version (
@@ -60,7 +60,7 @@ CREATE TABLE dbi_link.min_pg_version (
 );
 
 INSERT INTO dbi_link.min_pg_version (min_pg_version)
-VALUES (80119);
+VALUES (80400);
 
 CREATE RULE min_pg_version_no_insert AS
     ON INSERT TO dbi_link.min_pg_version
