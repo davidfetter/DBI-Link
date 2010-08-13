@@ -1,7 +1,7 @@
 %define sname	dbi-link
 
 Name:		postgresql-%{sname}
-Version:	2.0.0
+Version:	2.1.0
 Release:	1
 Summary:	Partial implementation of the SQL/MED portion of the SQL:2003 specification
 Group:		Applications/Databases
@@ -9,7 +9,7 @@ License:	BSD
 URL:		http://pgfoundry.org/projects/dbi-link/
 Source0:	http://pgfoundry.org/frs/download.php/1235/%{sname}-%{version}.tar.bz2
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires:	postgresql-server, perl, perl-DBI >= 1.52, perl-YAML >= 0.62
+Requires:	postgresql-server, perl, perl-DBI >= 1.52, perl-JSON >= 2.00
 BuildArch:	noarch
 
 %description
@@ -50,6 +50,10 @@ rm -rf %{buildroot}
 %{_datadir}/%{name}/*.sql
 
 %changelog
+* Thu Aug 12 2010 - David Fetter <david@fetter.org> 2.1.0-1
+- 2.1.0
+- Replaced YAML with JSON.
+
 * Sat Jan 27 2007 - David Fetter <david@fetter.org> 2.0.0-1
 - 2.0.0
 - Moved "test" files to the more appropriate "examples" directory per

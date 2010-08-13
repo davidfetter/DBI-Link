@@ -16,7 +16,7 @@ for your operating system or (in extremis) from CPAN:
 
 * DBI 1.43 or later
 * DBDs for each type of remote data source (DBD::Oracle, DBD::Sybase, etc.)
-* YAML
+* JSON
 
 Worked Examples:
 ---------------

@@ -51,20 +51,20 @@ The schema contains several functions:
                                                   List of functions
   Schema  |              Name              | Result data type |                  Argument data types
 ----------+--------------------------------+------------------+-------------------------------------------------------
- dbi_link | add_dbi_connection_environment | void             | bigint, yaml
+ dbi_link | add_dbi_connection_environment | void             | bigint, json
  dbi_link | available_drivers              | setof text       |
  dbi_link | cache_connection               | void             | integer
  dbi_link | data_sources                   | setof text       | text
  dbi_link | dbi_link_init                  | void             |
  dbi_link | is_data_source                 | boolean          | text
- dbi_link | is_yaml                        | boolean          | text
- dbi_link | make_accessor_functions        | boolean          | data_source, text, text, yaml, yaml, text, text, text
+ dbi_link | is_json                        | boolean          | text
+ dbi_link | make_accessor_functions        | boolean          | data_source, text, text, json, json, text, text, text
  dbi_link | remote_execute                 | void             | integer, text
  dbi_link | remote_select                  | setof record     | integer, text
- dbi_link | remote_select                  | setof record     | text, text, text, yaml, text
+ dbi_link | remote_select                  | setof record     | text, text, text, json, text
  dbi_link | shadow_trigger_func            | "trigger"        |
  dbi_link | version_integer                | integer          |
- dbi_link | yaml_result_set                | yaml             | text
+ dbi_link | json_result_set                | json             | text
 (14 rows)
 
 * available_drivers
@@ -86,15 +86,15 @@ The schema contains several functions:
 * remote_execute
     just one version of this, takes a data_source_id and a hunk of
     non-row-returning SQL.
-* is_data_source, is_yaml
-    used to create DATA_SOURCE and YAML domains respectively.
+* is_data_source, is_json
+    used to create DATA_SOURCE and JSON domains respectively.
 * shadow_trigger_func
     the meat of the write operations on remote data sources.
 * version_integer
     gets the current version of PostgreSQL as an integer for comparison.  See
     table min_pg_version below.
-* yaml_result_set
-    takes a row-returning query as text input, returns the results as a YAML.
+* json_result_set
+    takes a row-returning query as text input, returns the results as a JSON.
 
 These are some new DOMAINs used in DBI-Link:
 
@@ -102,7 +102,7 @@ These are some new DOMAINs used in DBI-Link:
   Schema  |    Name     | Type | Modifier |             Check
 ----------+-------------+------+----------+-------------------------------
  dbi_link | data_source | text |          | CHECK (is_data_source(VALUE))
- dbi_link | yaml        | text |          | CHECK (is_yaml(VALUE))
+ dbi_link | json        | text |          | CHECK (is_json(VALUE))
 (2 rows)
 
 This table contains the minimum PostgreSQL version that DBI-Link will run under.
@@ -128,7 +128,7 @@ This table holds some connection information.
  data_source    | data_source | not null
  user_name      | text        |
  auth           | text        |
- dbh_attributes | yaml        |
+ dbh_attributes | json        |
  remote_schema  | text        |
  remote_catalog | text        |
  local_schema   | text        |

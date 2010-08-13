@@ -20,7 +20,7 @@ old code.  It takes advantage of memory improvements to PL/Perl that come with
 PostgreSQL 8.1: spi_query() and spi_fetchrow() to avoid fetching the entire
 row set into memory, and return_next() to return rows as they arrive.  The new
 release has removed remove the eval()s from perl code, replacing them with
-YAML.
+YAML, then with JSON.
 
 The fourth milestone, still in design phase, may handle JOINs with remote data
 sources through some kind of predicate manipulation.

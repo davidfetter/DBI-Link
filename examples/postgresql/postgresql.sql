@@ -15,10 +15,7 @@ SELECT make_accessor_functions(
     'dbi:Pg:dbname=neil;host=localhost;port=5432',
     'neil',
     NULL,
-    '---
-AutoCommit: 1
-RaiseError: 1
-',
+    '{"AutoCommit":1, "RaiseError":1}'::dbi_link.json,
     NULL,
     'public',
     NULL,

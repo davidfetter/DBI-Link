@@ -15,10 +15,7 @@ SELECT dbi_link.make_accessor_functions(
     'dbi:mysql:database=sakila;host=localhost',
     'root',
     'foobar',
-    '---
-AutoCommit: 1
-RaiseError: 1
-',
+    '{"AutoCommit":1, "RaiseError":1}'::dbi_link.json,
     NULL,
     NULL,
     NULL,

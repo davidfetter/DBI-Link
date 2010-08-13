@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 
-use YAML;
+use JSON;
 
 my $foo = {
     RaiseError => 1,
@@ -11,4 +11,4 @@ my $foo = {
     csv_quote_char => '"',
 };
 
-print Dump($foo);
+print to_json($foo);
