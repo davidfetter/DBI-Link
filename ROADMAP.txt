@@ -1,9 +1,9 @@
 If you've ever wanted to join PostgreSQL tables from other data you
 can access via Perl's DBI, this is your project.
 
-DBI-Link requires PostgreSQL 8.1 or better, and has been tested with Perl
-5.8.8.  As DBI-Link 2.0 depends on several features introduced in PostgreSQL
-8.1, it will not be back-ported to older versions of PostgreSQL.
+DBI-Link requires PostgreSQL 9.3 or better and Perl 5.14 or better.
+As DBI-Link 2.1 depends on several features introduced in PostgreSQL
+9.3, it will not be back-ported to older versions of PostgreSQL.
 
 The first milestone, which was semi-working prototype code, is a user-visible
 function that takes a set of connection parameters to pass to DBI and a string
@@ -22,6 +22,11 @@ row set into memory, and return_next() to return rows as they arrive.  The new
 release has removed remove the eval()s from perl code, replacing them with
 YAML.
 
-The fourth milestone, still in design phase, may handle JOINs with remote data
-sources through some kind of predicate manipulation.
+The fourth milestone, tagged with version 2.1, is a relatively minor
+refactoring of the previous code.  It replaces the YAML domain with
+the JSON type which comes with Perl 5.14 and PostgreSQL 9.3.
+
+The fifth milestone, still in design phase, will probably discard
+much of this code and make DBI into its own FDW system in a way
+modeled after Multicorn <http://www.multicorn.org/>.
 

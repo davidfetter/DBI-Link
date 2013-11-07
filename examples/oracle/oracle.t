@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 $|++;
-use YAML;
+use JSON;
 use DBI;
 use DBD::Oracle qw(:ora_types);
 
@@ -44,7 +44,7 @@ while(my $table = $sth->fetchrow_hashref) {
         $table->{TABLE_SCHEM},
         $table->{TABLE_NAME}
     )->fetchall_arrayref({});
-    print map {"$_: ". Dump($t->{$_})} grep{ defined $t->{$_} } 'Table Name', 'Column Info', 'Primary Key Info';
+    print map {"$_: ". json_encode($t->{$_})} grep{ defined $t->{$_} } 'Table Name', 'Column Info', 'Primary Key Info';
     print;
 }
 $sth->finish;

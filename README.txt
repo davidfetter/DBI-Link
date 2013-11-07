@@ -6,7 +6,7 @@ the following:
 Requirements:
 -------------
 
-* PostgreSQL 8.1.19 or later installed and running.  It must have
+* PostgreSQL 9.3 or later installed and running.  It must have
 PL/Perl built with it.  Most distributions of PostgreSQL have this.
 
 * PostgreSQL superuser (postgres) access required for the installation
@@ -16,7 +16,7 @@ for your operating system or (in extremis) from CPAN:
 
 * DBI 1.43 or later
 * DBDs for each type of remote data source (DBD::Oracle, DBD::Sybase, etc.)
-* YAML
+* JSON
 
 Worked Examples:
 ---------------
@@ -83,10 +83,7 @@ SELECT make_accessor_functions(
     'dbi:mysql:database=sakila;host=localhost',
     'root',
     'foobar',
-    '---
-AutoCommit: 1
-RaiseError: 1
-',
+    '{"AutoCommit": 1, "RaiseError": 1}',
     NULL,
     NULL,
     NULL,

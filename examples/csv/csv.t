@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use YAML;
+use JSON;
 
 $|++;
 my $DEBUG=0;
@@ -29,7 +29,7 @@ foreach my $method (@methods) {
      }
 }
 
-print "All table info for 'DB'\n", Dump($dbh->{csv_tables});
+print "All table info for 'DB'\n", encode_json($dbh->{csv_tables});
 
 my @tables = grep { /csv$/i } $dbh->func('list_tables');
 foreach my $table (@tables) {
@@ -40,7 +40,7 @@ foreach my $table (@tables) {
     $sth->execute();
     print "    column names:\n", join("\n        ", @{ $sth->{NAME} });
     print "    number of fields: $sth->{NUM_OF_FIELDS}";
-    print "    table info for $table:\n", Dump($dbh->{csv_tables});
+    print "    table info for $table:\n", encode_json($dbh->{csv_tables});
     my $whole_table = $sth->fetchall_arrayref({});
 #################################################################
 #                                                               #
@@ -50,7 +50,7 @@ foreach my $table (@tables) {
 #                                                               #
 #################################################################
     $sth->finish();
-    print Dump($whole_table);
+    print encode_json($whole_table);
 }
 
 $dbh->disconnect;

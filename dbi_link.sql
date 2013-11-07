@@ -6,7 +6,7 @@ COMMENT ON SCHEMA dbi_link IS $$
 This schema holds all the functionality needed for using dbi-link.
 $$;
 
-CREATE OR REPLACE FUNCTION dbi_link.prepend_to_search_path(TEXT)
+CREATE OR REPLACE FUNCTION dbi_link.ensure_in_search_path(TEXT)
 RETURNS TEXT
 LANGUAGE SQL
 AS $$
@@ -25,84 +25,16 @@ WHERE
 SELECT setting FROM pg_catalog.pg_settings WHERE name = 'search_path';
 $$;
 
-SELECT dbi_link.prepend_to_search_path('dbi_link');
+SELECT dbi_link.ensure_in_search_path('dbi_link');
 
-CREATE OR REPLACE FUNCTION dbi_link.version_integer()
-RETURNS INTEGER
-STRICT
-LANGUAGE sql
-AS $$
-SELECT
-    sum(
-        pg_catalog.substring(
-            pg_catalog.split_part(
-                pg_catalog.current_setting(
-                    'server_version'
-                ),
-                '.',
-                i
-            ),
-            '^[[:digit:]]+'
-        )::NUMERIC * 10^(6-i*2)
-    )::INTEGER AS server_version_integer
-FROM
-    generate_series(1,3) AS s(i);
-$$;
+CREATE VIEW dbi_link.min_pg_version (
+    min_pg_version
+) AS
+VALUES (90300::int);
 
-COMMENT ON FUNCTION dbi_link.version_integer() IS $$
-This gets the integer version number e.g. 80400.  It will be used for
-turning on/off PostgreSQL version-specific goodies.  Thanks to Andrew
-Gierth for this.
-$$;
-
-CREATE TABLE dbi_link.min_pg_version (
-    min_pg_version INTEGER NOT NULL
-);
-
-INSERT INTO dbi_link.min_pg_version (min_pg_version)
-VALUES (80400);
-
-CREATE RULE min_pg_version_no_insert AS
-    ON INSERT TO dbi_link.min_pg_version
-    DO INSTEAD NOTHING;
-
-CREATE RULE min_pg_version_no_update AS
-    ON UPDATE TO dbi_link.min_pg_version
-    DO INSTEAD NOTHING;
-
-CREATE RULE min_pg_version_no_delete AS
-    ON DELETE TO dbi_link.min_pg_version
-    DO INSTEAD NOTHING;
-
-COMMENT ON TABLE dbi_link.min_pg_version IS
-$$This table contains exactly one row: the minimum version of
+COMMENT ON VIEW dbi_link.min_pg_version IS
+$$This view contains exactly one row: the minimum version of
 PostgreSQL required to use this version of DBI-Link.$$;
-
-CREATE OR REPLACE FUNCTION dbi_link.is_yaml(TEXT)
-RETURNS boolean
-STRICT
-LANGUAGE plperlu
-AS $$
-use YAML;
-
-eval {
-    my $hashref = Load($_[0]);
-};
-
-if ($@) {
-    return 0;
-}
-return 1;
-$$;
-
-COMMENT ON FUNCTION dbi_link.is_yaml(TEXT) IS $$Pretty self-explanatory ;)$$;
-
-CREATE DOMAIN yaml AS TEXT
-    CHECK (
-        dbi_link.is_yaml(VALUE)
-    );
-
-COMMENT ON DOMAIN dbi_link.yaml IS $$Pretty self-explanatory ;)$$;
 
 CREATE OR REPLACE FUNCTION dbi_link.is_data_source(TEXT)
 RETURNS boolean
@@ -135,7 +67,7 @@ CREATE TABLE dbi_link.dbi_connection (
     data_source DATA_SOURCE NOT NULL,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
+    dbh_attributes JSON,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT,
@@ -144,7 +76,7 @@ CREATE TABLE dbi_link.dbi_connection (
 
 COMMENT ON TABLE dbi_link.dbi_connection IS
 $$This table contains the necessary connection information for a DBI
-connection.  The dbh_attributes is a YAML <http://www.yaml.org>
+connection.  The dbh_attributes is a JSON <http://www.json.org>
 representation of the DBI database handle attributes which allows
 maximum flexibility while ensuring some modicum of safety.$$;
 
@@ -169,17 +101,17 @@ IS $$Environment settings for a $dbh$$;
 
 CREATE OR REPLACE FUNCTION dbi_link.add_dbi_connection_environment(
     in_data_source_id BIGINT,
-    in_settings YAML
+    in_settings JSON
 )
 RETURNS VOID
 LANGUAGE plperlU
 AS $$
-my ($data_source_id, $settings_yaml) = @_;
+my ($data_source_id, $settings_json) = @_;
 
-return unless (defined  $settings_yaml);
+return unless (defined  $settings_json);
 
-my $settings = Load($settings_yaml);
-warn Dump($settings) if $_SHARED{debug};
+my $settings = decode_json($settings_json);
+warn encode_json($settings) if $_SHARED{debug};
 die "In dbi_link.add_dbi_connection_environment, settings is a >@{[
     ref($settings)
 ]}<, not an array reference"
@@ -233,23 +165,23 @@ SQL
 return;
 $$;
 
-CREATE OR REPLACE FUNCTION dbi_link.yaml_result_set(in_query TEXT)
-RETURNS YAML
+CREATE OR REPLACE FUNCTION dbi_link.json_result_set(in_query TEXT)
+RETURNS JSON
 LANGUAGE plperlU
 AS $$
-use YAML;
+use JSON;
 my $rv = spi_exec_query($_[0]);
 if ($rv->{processed} > 0) {
-    return Dump($rv->{rows});
+    return encode_json($rv->{rows});
 }
 else {
     return undef;
 }
 $$;
 
-COMMENT ON FUNCTION dbi_link.yaml_result_set(in_query TEXT)
+COMMENT ON FUNCTION dbi_link.json_result_set(in_query TEXT)
 IS $$
-This takes a query as input and returns yaml that rolls up all the
+This takes a query as input and returns json that rolls up all the
 records.
 $$;
 
@@ -263,7 +195,7 @@ SELECT
     c.remote_schema,
     c.remote_catalog,
     c.local_schema,
-    dbi_link.yaml_result_set(
+    dbi_link.json_result_set(
         'SELECT
             env_name, env_value, env_action
         FROM
@@ -352,16 +284,19 @@ RETURNS VOID
 LANGUAGE plperlu
 AS $$
 $_SHARED{debug} = 1;
-$_SHARED{min_pg_version} = spi_exec_query('SELECT min_pg_version FROM dbi_link.min_pg_version')
-    ->{rows}
-    ->[0]
-    ->{min_pg_version };
-$_SHARED{server_version} = spi_exec_query('SELECT dbi_link.version_integer()')
-    ->{rows}
-    ->[0]
-    ->{version_integer};
-
-if ( $_SHARED{server_version} < $_SHARED{min_pg_version} ) {
+if (
+    spi_exec_query(<<'SQL')->{rows}->[0]->{too_small}
+SELECT
+    v.min_pg_version > s.setting AS too_small,
+    s.setting AS "server_version",
+    v.min_pg_version
+FROM
+    dbi_link.min_pg_version v
+CROSS JOIN
+    pg_catalog.settings s
+WHERE s."name"='server_version_num'
+SQL
+    ) {
     die "Server version is $_SHARED{server_version}.  You need at least $_SHARED{min_pg_version} to run DBI-Link.";
 }
 my $shared = populate_hashref();
@@ -394,7 +329,7 @@ die join("\n",
 get_connection_info => sub {
     my ($args) = @_;
     warn "Entering get_connection_info" if $_SHARED{debug};
-    warn 'ref($args) is '.ref($args)."\n".Dump($args) if $_SHARED{debug};
+    warn 'ref($args) is '.ref($args)."\n".encode_json($args) if $_SHARED{debug};
     unless (defined $args->{data_source_id}) {
         die "In get_connection_info, must provide a data_source_id";
     }
@@ -424,18 +359,18 @@ SQL
         # Do nothing
         # warn "Got 1 row back" if $_SHARED{debug};
     }
-    # warn Dump($rv->{rows}[0]) if $_SHARED{debug};
+    # warn encode_json($rv->{rows}[0]) if $_SHARED{debug};
     warn "Leaving get_connection_info" if $_SHARED{debug};
     return $rv->{rows}[0];
 },
 
 set_environment => sub {
-    use YAML;
+    use JSON;
 
     my $dbi_connection_environment = $_[0];
 
     if (defined $dbi_connection_environment) {
-        my $parsed_env = Load($dbi_connection_environment);
+        my $parsed_env = decode_json($dbi_connection_environment);
         die "In set_environment, argument must be an array reference."
             unless (ref($parsed_env) eq 'ARRAY');
         foreach my $setting (@$parsed_env) {
@@ -471,12 +406,12 @@ set_environment => sub {
 },
 
 get_dbh => sub {
-    use YAML;
+    use JSON;
     use DBI;
     local %ENV;
     my ($connection_info) = @_;
     my $attribute_hashref;
-    warn "In get_dbh, input connection info is\n".Dump($connection_info) if $_SHARED{debug};
+    warn "In get_dbh, input connection info is\n".encode_json($connection_info) if $_SHARED{debug};
     ##################################################
     #                                                #
     # Here, we get the raw connection info as input. #
@@ -496,7 +431,7 @@ get_dbh => sub {
         $connection_info->{dbi_connection_environment}
     );
 
-    $attribute_hashref = Load(
+    $attribute_hashref = decode_json(
         $connection_info->{dbh_attributes}
     );
     my $dbh = DBI->connect(
@@ -615,7 +550,7 @@ get_connection_info:
         data_source TEXT
         user_name TEXT
         auth TEXT
-        dbh_attributes YAML
+        dbh_attributes JSON
         remote_schema TEXT
         remote_catalog TEXT
         local_schema TEXT
@@ -629,7 +564,7 @@ get_dbh:
         data_source TEXT
         user_name TEXT
         auth TEXT
-        dbh_attributes YAML
+        dbh_attributes JSON
     Output:
         a dbh (perl structure)
 
@@ -666,7 +601,7 @@ CREATE OR REPLACE FUNCTION dbi_link.cache_connection(
 RETURNS VOID
 LANGUAGE plperlU
 AS $$
-use YAML;
+use JSON;
 spi_exec_query('SELECT dbi_link.dbi_link_init()');
 
 return if (defined $_SHARED{dbh}{ $_[0] } );
@@ -676,7 +611,7 @@ warn "In cache_connection, there's no shared dbh $_[0]" if $_SHARED{debug};
 my $info = $_SHARED{get_connection_info}->({
     data_source_id => $_[0]
 });
-warn Dump($info) if $_SHARED{debug};
+warn encode_json($info) if $_SHARED{debug};
 
 $_SHARED{dbh}{ $_[0] } = $_SHARED{get_dbh}->(
     $info
@@ -726,7 +661,7 @@ CREATE OR REPLACE FUNCTION dbi_link.remote_select (
     data_source TEXT,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
+    dbh_attributes JSON,
     query TEXT
 )
 RETURNS SETOF RECORD
@@ -771,7 +706,7 @@ COMMENT ON FUNCTION dbi_link.remote_select (
     data_source TEXT,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
+    dbh_attributes JSON,
     query TEXT
 ) IS $$
 This function does SELECTs on a remote data source de novo.
@@ -830,7 +765,7 @@ die "In shadow_trigger_function, data_source_id must be an integer"
     unless ($data_source_id =~ /^\d+$/);
 my $query = "SELECT dbi_link.cache_connection( $data_source_id )";
 warn "In shadow_trigger_function, calling\n    $query" if $_SHARED{debug};
-warn "In shadow_trigger_function, the trigger payload is\n". Dump(\$_TD) if $_SHARED{debug};
+warn "In shadow_trigger_function, the trigger payload is\n". encode_json(\$_TD) if $_SHARED{debug};
 my $rv = spi_exec_query($query);
 
 my $remote_schema = $_SHARED{get_connection_info}->({
@@ -955,7 +890,7 @@ sub make_pairs {
         unless (defined $params->{payload});
     die "In make_pairs, payload must be a hash reference!"
         unless (ref $params->{payload} eq 'HASH');
-    warn "In make_pairs, parameters are:\n". Dump($params) if $_SHARED{debug};
+    warn "In make_pairs, parameters are:\n". encode_json($params) if $_SHARED{debug};
     my @pairs;
     foreach my $key (
         keys %{ $params->{payload} }
@@ -980,7 +915,7 @@ sub make_pairs {
             $params->{joiner},
             @pairs,
         );
-    warn "In make_pairs, the pairs are:\n". Dump(\@pairs) if $_SHARED{debug};
+    warn "In make_pairs, the pairs are:\n". encode_json(\@pairs) if $_SHARED{debug};
     return $ret;
 }
 
@@ -990,8 +925,8 @@ CREATE OR REPLACE FUNCTION set_up_connection (
     data_source DATA_SOURCE,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
-    dbi_connection_environment YAML,
+    dbh_attributes JSON,
+    dbi_connection_environment JSON,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT
@@ -1039,7 +974,7 @@ $_SHARED{set_environment}->(
     $params->{dbi_connection_environment}
 );
 
-my $attr_href = Load($params->{dbh_attributes});
+my $attr_href = decode_json($params->{dbh_attributes});
 my $dbh = DBI->connect(
     $params->{data_source},
     $params->{user_name},
@@ -1188,7 +1123,7 @@ my $identifier_local_schema = $_SHARED{quote_ident}->(
     $params->{local_schema}
 );
 my $set_search = <<SQL;
-SELECT dbi_link.prepend_to_search_path('$identifier_local_schema');
+SELECT dbi_link.ensure_in_search_path('$identifier_local_schema');
 SQL
 
 warn $set_search if $_SHARED{debug};
@@ -1472,8 +1407,8 @@ CREATE OR REPLACE FUNCTION dbi_link.make_accessor_functions (
     data_source DATA_SOURCE,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
-    dbi_connection_environment YAML,
+    dbh_attributes JSON,
+    dbi_connection_environment JSON,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT
@@ -1541,8 +1476,8 @@ COMMENT ON FUNCTION dbi_link.make_accessor_functions (
     data_source DATA_SOURCE,
     user_name TEXT,
     auth TEXT,
-    dbh_attributes YAML,
-    dbi_connection_environment YAML,
+    dbh_attributes JSON,
+    dbi_connection_environment JSON,
     remote_schema TEXT,
     remote_catalog TEXT,
     local_schema TEXT
@@ -1566,7 +1501,7 @@ my $connection_info = $_SHARED{get_connection_info}->({
     data_source_id => $data_source_id,
 });
 
-warn "connection info is\n".Dump($connection_info)
+warn "connection info is\n".encode_json($connection_info)
     if $_SHARED{debug};
 
 my $literal =  $_SHARED{quote_literal}->(

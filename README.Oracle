@@ -48,31 +48,32 @@ Other environment variables influence how numbers, dates and timestamps
 will be displayed and can be useful if you want to process the data with
 PostgreSQL.
 
-You can specify environment variables by passing them in YAML format
+You can specify environment variables by passing them in JSON format
 as fifth argument to make_accessor_functions(), for example:
 
----
-- env_name: ORACLE_HOME
-  env_value: /ORACLE/product/10.2.0
-  env_action: overwrite
-- env_name: NLS_LANG
-  env_value: AMERICAN_AMERICA.AL32UTF8
-  env_action: overwrite
-- env_name: NLS_DATE_FORMAT
-  env_value: "YYYY-MM-DD HH24:MI:SS"
-  env_action: overwrite
-- env_name: NLS_TIMESTAMP_FORMAT
-  env_value: "YYYY-MM-DD HH24:MI:SS.FF"
-  env_action: overwrite
-- env_name: NLS_TIMESTAMP_TZ_FORMAT
-  env_value: "YYYY-MM-DD HH24:MI:SS.FF TZH"
-  env_action: overwrite
-- env_name: TNS_ADMIN
-  env_value: /ORACLE/product/10.2.0/network/admin
-  env_action: overwrite
-- env_name: LDAP_ADMIN
-  env_value: /ORACLE/product/10.2.0/ldap/admin
-  env_action: overwrite
+{
+  {"env_name": "ORACLE_HOME",
+   "env_value": "/ORACLE/product/10.2.0",
+   "env_action": "overwrite"}
+  {"env_name": "NLS_LANG",
+   "env_value": "AMERICAN_AMERICA.AL32UTF8",
+   "env_action": "overwrite"}
+  {"env_name": "NLS_DATE_FORMAT",
+   "env_value": "YYYY-MM-DD HH24:MI:SS",
+   "env_action": "overwrite"}
+  {"env_name": "NLS_TIMESTAMP_FORMAT",
+   "env_value": "YYYY-MM-DD HH24:MI:SS.FF",
+   "env_action": "overwrite"}
+  {"env_name": "NLS_TIMESTAMP_TZ_FORMAT",
+   "env_value": "YYYY-MM-DD HH24:MI:SS.FF TZH",
+   "env_action": "overwrite"}
+  {"env_name": "TNS_ADMIN",
+   "env_value": "/ORACLE/product/10.2.0/network/admin",
+   "env_action": "overwrite"}
+  {"env_name": "LDAP_ADMIN",
+   "env_value": "/ORACLE/product/10.2.0/ldap/admin",
+   "env_action": "overwrite"}
+}
 
 PostgreSQL server crashes with Oracle LDAP directory naming:
 ------------------------------------------------------------
