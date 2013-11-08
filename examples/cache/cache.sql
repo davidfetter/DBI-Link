@@ -9,7 +9,7 @@
  * local schema:    cache
  */
 
-SELECT dbi_link.prepend_to_search_path('dbi_link');
+SELECT dbi_link.ensure_in_search_path('dbi_link');
 
 SELECT make_accessor_functions(
     'dbi:ODBC:Cache',
