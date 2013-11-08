@@ -284,20 +284,18 @@ RETURNS VOID
 LANGUAGE plperlu
 AS $$
 $_SHARED{debug} = 1;
-if (
-    spi_exec_query(<<'SQL')->{rows}->[0]->{too_small}
+my $res = spi_exec_query(<<'SQL')->{rows}[0];
 SELECT
-    v.min_pg_version > s.setting AS too_small,
-    s.setting AS "server_version",
+    s.setting AS "server_version_num",
     v.min_pg_version
 FROM
     dbi_link.min_pg_version v
 CROSS JOIN
-    pg_catalog.settings s
+    pg_catalog.pg_settings s
 WHERE s."name"='server_version_num'
 SQL
-    ) {
-    die "Server version is $_SHARED{server_version}.  You need at least $_SHARED{min_pg_version} to run DBI-Link.";
+if ($res->{server_version_num} < $res->{min_pg_version}) {
+    die "Server version is $res->{server_version_num}.  You need at least $res->{min_pg_version} to run DBI-Link.";
 }
 my $shared = populate_hashref();
 
